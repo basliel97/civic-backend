@@ -108,4 +108,30 @@ auth.post('/reset-password', async (c) => {
   }
 });
 
+auth.post('/initiate-reset', async (c) => {
+  const { fin } = await c.req.json();
+  if (!fin) return c.json({ error: "FIN required" }, 400);
+
+  // A. Check if user EXISTS in Supabase
+  const { data: user } = await supabaseAdmin
+    .from('profiles')
+    .select('id')
+    .eq('fin', fin)
+    .single();
+
+  if (!user) {
+    // Security: You can return generic "If user exists, OTP sent" to prevent enumeration,
+    // but for this project, let's return a clear error.
+    return c.json({ error: "No account found with this ID. Please Register." }, 404);
+  }
+
+  // B. Call Fayda to send OTP
+  try {
+    await FaydaService.requestOtp(fin);
+    return c.json({ message: "OTP sent" });
+  } catch (err: any) {
+    return c.json({ error: err.message }, 500);
+  }
+});
+
 export default auth;
