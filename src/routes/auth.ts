@@ -31,6 +31,61 @@ auth.post('/initiate-register', async (c) => {
   }
 });
 
+// 4. LOGIN (Supports FIN or Phone Number)
+auth.post('/login', async (c) => {
+  const { loginInput, password } = await c.req.json(); // Accept generic "loginInput"
+
+  if (!loginInput || !password) return c.json({ error: "Missing Login Details" }, 400);
+
+  try {
+    // A. DETERMINE IF IT IS FIN (12 digits) OR PHONE
+    const isFin = /^\d{12}$/.test(loginInput.trim());
+    let queryField = isFin ? 'fin' : 'phone_number';
+    
+    // Normalize Phone if needed (handle 09... vs +251...)
+    // For this simple example, we assume input matches what's in DB
+    let searchValue = loginInput.trim();
+
+    // B. LOOKUP PROFILE
+    // We verify against the 'profiles' table to find the linked Auth ID
+    const { data: profile } = await supabaseAdmin
+      .from('profiles')
+      .select('id')
+      .eq(queryField, searchValue)
+      .single();
+
+    if (!profile) {
+      return c.json({ error: isFin ? "Invalid Fayda ID" : "Phone number not registered" }, 404);
+    }
+
+    // C. GET THE ACTUAL AUTH EMAIL
+    const { data: userData, error: userError } = await supabaseAdmin.auth.admin.getUserById(profile.id);
+    
+    if (userError || !userData.user) {
+        return c.json({ error: "System Error: User account mismatch" }, 500);
+    }
+
+    const actualEmail = userData.user.email;
+
+    // D. PERFORM LOGIN
+    const { data, error } = await supabaseAdmin.auth.signInWithPassword({
+      email: actualEmail!,
+      password: password,
+    });
+
+    if (error) return c.json({ error: "Incorrect Password" }, 401);
+
+    // E. RETURN SESSION
+    return c.json({ 
+      session: data.session,
+      user: data.user
+    });
+
+  } catch (err: any) {
+    return c.json({ error: err.message }, 500);
+  }
+});
+
 // 2. COMPLETE REGISTRATION (Step 2 & 3)
 // Mobile sends FIN + OTP + Password -> We verify Fayda -> We create Supabase User
 auth.post('/complete-register', async (c) => {
