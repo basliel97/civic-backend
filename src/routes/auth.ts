@@ -32,54 +32,78 @@ auth.post('/initiate-register', async (c) => {
 });
 
 // 4. LOGIN (Supports FIN or Phone Number)
-auth.post('/login', async (c) => {
-  const { loginInput, password } = await c.req.json(); // Accept generic "loginInput"
+// src/routes/auth.ts (In civic-backend)
 
-  if (!loginInput || !password) return c.json({ error: "Missing Login Details" }, 400);
+auth.post('/login', async (c) => {
+  const { loginInput, password } = await c.req.json();
+
+  // Basic cleanup (remove spaces)
+  const rawInput = (loginInput || "").trim();
+
+  if (!rawInput || !password) {
+    return c.json({ error: "Missing login details" }, 400);
+  }
 
   try {
-    // A. DETERMINE IF IT IS FIN (12 digits) OR PHONE
-    const isFin = /^\d{12}$/.test(loginInput.trim());
-    let queryField = isFin ? 'fin' : 'phone_number';
-    
-    // Normalize Phone if needed (handle 09... vs +251...)
-    // For this simple example, we assume input matches what's in DB
-    let searchValue = loginInput.trim();
+    let profileData = null;
 
-    // B. LOOKUP PROFILE
-    // We verify against the 'profiles' table to find the linked Auth ID
-    const { data: profile } = await supabaseAdmin
-      .from('profiles')
-      .select('id')
-      .eq(queryField, searchValue)
-      .single();
+    // 1. DETERMINE TYPE: Is it a FIN? (Strictly 12 digits)
+    if (/^\d{12}$/.test(rawInput)) {
+      
+      // It's a FIN - Exact match only
+      const { data } = await supabaseAdmin
+        .from('profiles')
+        .select('id')
+        .eq('fin', rawInput)
+        .maybeSingle();
+      
+      profileData = data;
 
-    if (!profile) {
-      return c.json({ error: isFin ? "Invalid Fayda ID" : "Phone number not registered" }, 404);
+    } else {
+      // 2. IT IS A PHONE NUMBER (Logic for Both Formats)
+      
+      // Create an array of possible formats
+      let possibleNumbers = [rawInput];
+
+      // Logic: If user types "09...", also add "+2519..." to search list
+      if (rawInput.startsWith('09')) {
+        possibleNumbers.push('+251' + rawInput.substring(1));
+      }
+      // Logic: If user types "+2519...", also add "09..." to search list
+      else if (rawInput.startsWith('+2519')) {
+        possibleNumbers.push('0' + rawInput.substring(4));
+      }
+
+      console.log(`Searching for phone in formats: ${possibleNumbers.join(' OR ')}`);
+
+      // Search database for ANY of these numbers
+      const { data } = await supabaseAdmin
+        .from('profiles')
+        .select('id')
+        .in('phone_number', possibleNumbers) // Checks both 09 and +251
+        .maybeSingle();
+
+      profileData = data;
     }
 
-    // C. GET THE ACTUAL AUTH EMAIL
-    const { data: userData, error: userError } = await supabaseAdmin.auth.admin.getUserById(profile.id);
-    
-    if (userError || !userData.user) {
-        return c.json({ error: "System Error: User account mismatch" }, 500);
+    if (!profileData) {
+      return c.json({ error: "User not found with this ID or Phone" }, 404);
     }
 
-    const actualEmail = userData.user.email;
+    // 3. GET EMAIL (Same as before)
+    const { data: userData, error: userError } = await supabaseAdmin.auth.admin.getUserById(profileData.id);
+    
+    if (userError || !userData.user) return c.json({ error: "Account mismatch" }, 500);
 
-    // D. PERFORM LOGIN
-    const { data, error } = await supabaseAdmin.auth.signInWithPassword({
-      email: actualEmail!,
+    // 4. PERFORM LOGIN
+    const { data: sessionData, error: authError } = await supabaseAdmin.auth.signInWithPassword({
+      email: userData.user.email!,
       password: password,
     });
 
-    if (error) return c.json({ error: "Incorrect Password" }, 401);
+    if (authError) return c.json({ error: "Incorrect Password" }, 401);
 
-    // E. RETURN SESSION
-    return c.json({ 
-      session: data.session,
-      user: data.user
-    });
+    return c.json({ session: sessionData.session, user: sessionData.user });
 
   } catch (err: any) {
     return c.json({ error: err.message }, 500);
