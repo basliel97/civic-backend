@@ -3,14 +3,16 @@ import { Hono } from 'hono';
 import { cors } from 'hono/cors';
 import { config } from './config/env.js';
 import authRoutes from './routes/auth.js';
+import adminRoutes from './routes/admin.js'; // <--- IMPORT THIS
 
 const app = new Hono();
 
 // Middleware
-app.use('/*', cors()); // Allow Mobile App to connect
+app.use('/*', cors()); 
 
 // Routes
-app.route('/auth', authRoutes);
+app.route('/auth', authRoutes);     // Citizen Mobile App
+app.route('/admin', adminRoutes);   // Admin React Dashboard <--- ADD THIS
 
 // Health Check
 app.get('/', (c) => {
