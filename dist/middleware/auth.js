@@ -1,0 +1,127 @@
+import { createMiddleware } from 'hono/factory';
+import { Pool } from 'pg';
+import { config } from '../config/env.js';
+const pool = new Pool({
+    connectionString: config.databaseUrl,
+});
+/**
+ * Admin Authorization Middleware
+ * Verifies JWT token and checks if user is admin or super_admin
+ * Also tracks last login time
+ */
+export const adminAuth = () => createMiddleware(async (c, next) => {
+    const authHeader = c.req.header('Authorization');
+    if (!authHeader) {
+        return c.json({
+            success: false,
+            error: 'Authorization header required'
+        }, 401);
+    }
+    const token = authHeader.replace('Bearer ', '');
+    try {
+        // Get session from database
+        const sessionResult = await pool.query('SELECT "userId", expires_at FROM "session" WHERE token = $1', [token]);
+        if (sessionResult.rows.length === 0) {
+            return c.json({
+                success: false,
+                error: 'Invalid or expired token'
+            }, 401);
+        }
+        const session = sessionResult.rows[0];
+        // Check if session expired
+        if (new Date(session.expires_at) < new Date()) {
+            return c.json({
+                success: false,
+                error: 'Session expired'
+            }, 401);
+        }
+        // Get user details
+        const userResult = await pool.query('SELECT id, email, name, role, status FROM "user" WHERE id = $1', [session.userId]);
+        if (userResult.rows.length === 0) {
+            return c.json({
+                success: false,
+                error: 'User not found'
+            }, 404);
+        }
+        const user = userResult.rows[0];
+        // Check if user is active
+        if (user.status !== 'active') {
+            return c.json({
+                success: false,
+                error: `Account is ${user.status}`
+            }, 403);
+        }
+        // Check if user is admin
+        if (user.role !== 'admin' && user.role !== 'super_admin') {
+            return c.json({
+                success: false,
+                error: 'Unauthorized: Admins only'
+            }, 403);
+        }
+        // Update last login time
+        await pool.query('UPDATE "user" SET last_login_at = NOW() WHERE id = $1', [user.id]);
+        // Set user in context
+        c.set('user', user);
+        c.set('userId', user.id);
+        c.set('userRole', user.role);
+        await next();
+    }
+    catch (error) {
+        console.error('[Auth Middleware] Error:', error);
+        return c.json({
+            success: false,
+            error: 'Authentication failed'
+        }, 500);
+    }
+});
+/**
+ * Super Admin Authorization Middleware
+ * Verifies user is super_admin
+ */
+export const superAdminAuth = () => createMiddleware(async (c, next) => {
+    const userRole = c.get('userRole');
+    if (userRole !== 'super_admin') {
+        return c.json({
+            success: false,
+            error: 'Unauthorized: Super Admin only'
+        }, 403);
+    }
+    await next();
+});
+/**
+ * Active User Middleware
+ * Checks if user account is active (not deleted or inactive)
+ */
+export const activeUser = () => createMiddleware(async (c, next) => {
+    const userId = c.get('userId');
+    try {
+        const result = await pool.query('SELECT status, deleted_at FROM "user" WHERE id = $1', [userId]);
+        if (result.rows.length === 0) {
+            return c.json({
+                success: false,
+                error: 'User not found'
+            }, 404);
+        }
+        const user = result.rows[0];
+        if (user.deleted_at) {
+            return c.json({
+                success: false,
+                error: 'Account has been deleted'
+            }, 403);
+        }
+        if (user.status === 'inactive') {
+            return c.json({
+                success: false,
+                error: 'Account is inactive'
+            }, 403);
+        }
+        await next();
+    }
+    catch (error) {
+        console.error('[Active User Middleware] Error:', error);
+        return c.json({
+            success: false,
+            error: 'Authorization check failed'
+        }, 500);
+    }
+});

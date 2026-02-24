@@ -1,5 +1,5 @@
 import { betterAuth } from "better-auth";
-import { admin } from "better-auth/plugins";
+import { admin, username } from "better-auth/plugins";
 import { Pool } from "pg";
 import bcrypt from "bcrypt";
 import { config } from "../config/env.js";
@@ -105,6 +105,13 @@ export const auth = betterAuth({
   // User configuration with additional fields for Civic platform
   user: {
     additionalFields: {
+      // Username stores FIN for citizens
+      username: {
+        type: "string",
+        required: false,
+        input: true,
+      },
+      
       // Citizen identification
       fin: {
         type: "string",
@@ -148,8 +155,19 @@ export const auth = betterAuth({
     },
   },
 
-  // Admin plugin with role-based access control
+  // Plugins configuration
   plugins: [
+    // Username plugin - allows FIN as username for citizens
+    username({
+      minUsernameLength: 12,
+      maxUsernameLength: 12,
+      usernameValidator: (username) => {
+        // Validate FIN format (12 digits)
+        return /^\d{12}$/.test(username);
+      },
+    }),
+    
+    // Admin plugin for user management
     admin({
       defaultRole: "citizen",
     }),

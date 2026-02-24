@@ -4,6 +4,8 @@ import { cors } from 'hono/cors';
 import { config } from './config/env.js';
 import { auth } from './auth/index.js';
 import citizenAuthRoutes from './routes/citizen-auth.js';
+import adminRoutes from './routes/admin.js';
+import citizenManagementRoutes from './routes/citizen-management.js';
 
 const app = new Hono();
 
@@ -24,6 +26,12 @@ app.on(['POST', 'GET', 'PUT', 'DELETE'], '/api/auth/*', (c) => {
 // Mount Citizen Auth routes (Fayda integration)
 app.route('/api/citizen', citizenAuthRoutes);
 
+// Mount Admin routes
+app.route('/api/admin', adminRoutes);
+
+// Mount Citizen Management routes
+app.route('/api/admin', citizenManagementRoutes);
+
 // Health Check
 app.get('/', (c) => {
   return c.json({ 
@@ -37,11 +45,17 @@ app.get('/', (c) => {
 app.get('/api', (c) => {
   return c.json({
     name: 'Civic Backend API',
-    version: '1.0.0',
+    version: '2.0.0',
     documentation: '/api/docs',
+    features: {
+      auth: 'Better Auth with username support (FIN as username)',
+      email: 'Optional for citizens, required for admins',
+      password_reset: 'SMS OTP for citizens, email for admins'
+    },
     endpoints: {
       auth: '/api/auth/*',
       citizen: '/api/citizen/*',
+      admin: '/api/admin/*'
     }
   });
 });
@@ -49,6 +63,7 @@ app.get('/api', (c) => {
 console.log(`🚀 Server running on http://localhost:${config.port}`);
 console.log(`📚 Better Auth endpoints: ${config.betterAuthUrl}/api/auth/*`);
 console.log(`👥 Citizen endpoints: ${config.betterAuthUrl}/api/citizen/*`);
+console.log(`👮 Admin endpoints: ${config.betterAuthUrl}/api/admin/*`);
 
 serve({
   fetch: app.fetch,

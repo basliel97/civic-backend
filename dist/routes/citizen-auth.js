@@ -61,53 +61,60 @@ citizenAuth.post("/initiate-register", async (c) => {
  * POST /citizen/complete-register
  * Complete registration after Fayda OTP verification
  * Creates user in Better Auth with verified identity
+ *
+ * NEW: Email is optional, FIN is used as username
  */
 citizenAuth.post("/complete-register", async (c) => {
     try {
-        const { fin, otp, email, password } = await c.req.json();
-        // Validate inputs
-        if (!fin || !otp || !email || !password) {
+        const { fin, otp, phone, password, email } = await c.req.json();
+        // Validate required inputs
+        if (!fin || !otp || !phone || !password) {
             return c.json({
                 success: false,
-                error: "FIN, OTP, email, and password are required"
+                error: "FIN, OTP, phone, and password are required"
             }, 400);
         }
         // Verify OTP with Fayda
         const kycData = await FaydaService.verifyOtp(fin, otp);
-        // Check if email already exists
-        const existingEmail = await pool.query('SELECT id FROM "user" WHERE email = $1', [email]);
-        if (existingEmail.rows.length > 0) {
+        // Check if FIN already exists (using username field)
+        const existingUser = await pool.query('SELECT id FROM "user" WHERE username = $1', [fin]);
+        if (existingUser.rows.length > 0) {
             return c.json({
                 success: false,
-                error: "Email already registered"
+                error: "User already registered"
             }, 409);
         }
         // Create user via Better Auth API
+        // Use username plugin - FIN becomes username, email is optional
+        const signUpBody = {
+            email: email || `${fin}@civic.local`, // Use fake email if not provided
+            password,
+            name: kycData.personalIdentity.fullName,
+        };
         const userResult = await auth.api.signUpEmail({
-            body: {
-                email,
-                password,
-                name: kycData.personalIdentity.fullName,
-            },
+            body: signUpBody,
         });
         if (!userResult || !userResult.user) {
             throw new Error("Failed to create user");
         }
-        // Update user with Fayda data
+        // Update user with Fayda data and username
         await pool.query(`UPDATE "user" SET 
-        fin = $1,
-        phone_number = $2,
-        dob = $3,
-        gender = $4,
-        photo_url = $5,
+        username = $1,
+        fin = $2,
+        phone_number = $3,
+        dob = $4,
+        gender = $5,
+        photo_url = $6,
         role = 'citizen',
-        email_verified = true
-      WHERE id = $6`, [
+        email_verified = $7
+      WHERE id = $8`, [
             fin,
-            kycData.personalIdentity.phone,
+            fin,
+            phone,
             kycData.personalIdentity.dob,
             kycData.personalIdentity.gender,
             kycData.biometrics?.face || null,
+            email ? true : false,
             userResult.user.id,
         ]);
         return c.json({
@@ -133,6 +140,8 @@ citizenAuth.post("/complete-register", async (c) => {
  * POST /citizen/login
  * Login with FIN or phone number
  * Validates credentials and returns Better Auth session
+ *
+ * UPDATED: Uses username (FIN) for authentication
  */
 citizenAuth.post("/login", async (c) => {
     try {
@@ -144,14 +153,13 @@ citizenAuth.post("/login", async (c) => {
                 error: "Login input and password are required"
             }, 400);
         }
-        let userData = null;
+        let fin = null;
         // Check if input is FIN (12 digits)
         if (/^\d{12}$/.test(rawInput)) {
-            const result = await pool.query('SELECT id, email, failed_login_attempts, locked_until FROM "user" WHERE fin = $1', [rawInput]);
-            userData = result.rows[0];
+            fin = rawInput;
         }
         else {
-            // Check phone numbers (handle different formats)
+            // Input is phone number - lookup FIN from phone
             const possibleNumbers = [rawInput];
             if (rawInput.startsWith("09")) {
                 possibleNumbers.push("+251" + rawInput.substring(1));
@@ -159,16 +167,26 @@ citizenAuth.post("/login", async (c) => {
             else if (rawInput.startsWith("+2519")) {
                 possibleNumbers.push("0" + rawInput.substring(4));
             }
-            const result = await pool.query('SELECT id, email, failed_login_attempts, locked_until FROM "user" WHERE phone_number = ANY($1)', [possibleNumbers]);
-            userData = result.rows[0];
+            const result = await pool.query('SELECT username FROM "user" WHERE phone_number = ANY($1)', [possibleNumbers]);
+            if (result.rows.length > 0) {
+                fin = result.rows[0].username;
+            }
         }
-        if (!userData) {
+        if (!fin) {
             return c.json({
                 success: false,
                 error: "Invalid credentials"
             }, 401);
         }
         // Check if account is locked
+        const userCheck = await pool.query('SELECT id, failed_login_attempts, locked_until FROM "user" WHERE username = $1', [fin]);
+        if (userCheck.rows.length === 0) {
+            return c.json({
+                success: false,
+                error: "Invalid credentials"
+            }, 401);
+        }
+        const userData = userCheck.rows[0];
         if (userData.locked_until && new Date(userData.locked_until) > new Date()) {
             const waitTime = Math.ceil((new Date(userData.locked_until).getTime() - Date.now()) / 60000);
             return c.json({
@@ -176,10 +194,10 @@ citizenAuth.post("/login", async (c) => {
                 error: `Account locked. Try again in ${waitTime} minutes.`
             }, 403);
         }
-        // Attempt login via Better Auth
-        const loginResult = await auth.api.signInEmail({
+        // Attempt login via Better Auth using username (FIN)
+        const loginResult = await auth.api.signInUsername({
             body: {
-                email: userData.email,
+                username: fin,
                 password,
             },
         });
@@ -204,15 +222,17 @@ citizenAuth.post("/login", async (c) => {
         }
         // Login success - reset failed attempts
         await pool.query('UPDATE "user" SET failed_login_attempts = 0, locked_until = NULL WHERE id = $1', [userData.id]);
+        // Get full user data including role from database
+        const fullUser = await pool.query('SELECT id, email, name, role FROM "user" WHERE id = $1', [loginResult.user.id]);
         return c.json({
             success: true,
             message: "Login successful",
             token: loginResult.token,
-            user: {
+            user: fullUser.rows[0] || {
                 id: loginResult.user.id,
                 email: loginResult.user.email,
                 name: loginResult.user.name,
-                role: loginResult.user.role,
+                role: "citizen",
             },
         });
     }
