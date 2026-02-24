@@ -39,7 +39,7 @@ export const adminAuth = () => createMiddleware<{ Variables: AuthContext }>(asyn
   try {
     // Get session from database
     const sessionResult = await pool.query(
-      'SELECT "userId", expires_at FROM "session" WHERE token = $1',
+      'SELECT "userId", "expiresAt" FROM "session" WHERE token = $1',
       [token]
     );
 
@@ -53,7 +53,7 @@ export const adminAuth = () => createMiddleware<{ Variables: AuthContext }>(asyn
     const session = sessionResult.rows[0];
     
     // Check if session expired
-    if (new Date(session.expires_at) < new Date()) {
+    if (new Date(session.expiresAt) < new Date()) {
       return c.json({ 
         success: false, 
         error: 'Session expired' 
@@ -93,7 +93,7 @@ export const adminAuth = () => createMiddleware<{ Variables: AuthContext }>(asyn
 
     // Update last login time
     await pool.query(
-      'UPDATE "user" SET last_login_at = NOW() WHERE id = $1',
+      'UPDATE "user" SET "last_login_at" = NOW() WHERE id = $1',
       [user.id]
     );
 
