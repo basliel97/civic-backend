@@ -6,6 +6,9 @@ import { auth } from './auth/index.js';
 import citizenAuthRoutes from './routes/citizen-auth.js';
 import adminRoutes from './routes/admin.js';
 import citizenManagementRoutes from './routes/citizen-management.js';
+import civicRoutes from './routes/civic.js';
+import civicAdminRoutes from './routes/civic-admin.js';
+import workTypesRoutes from './routes/work-types.js';
 
 const app = new Hono();
 
@@ -31,6 +34,15 @@ app.route('/api/admin', adminRoutes);
 
 // Mount Citizen Management routes
 app.route('/api/admin', citizenManagementRoutes);
+
+// Mount Civic Engagement routes (public)
+app.route('/api', civicRoutes);
+
+// Mount Civic Engagement Admin routes
+app.route('/api/admin', civicAdminRoutes);
+
+// Mount Work Types routes
+app.route('/api', workTypesRoutes);
 
 // Health Check
 app.get('/', (c) => {
