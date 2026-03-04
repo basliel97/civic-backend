@@ -256,48 +256,89 @@ export async function votePoll(pollId: string, userId: string, optionIndex: numb
   return result.rows[0];
 }
 
-export async function getPollResults(pollId: string, userId?: string) {
-  const poll = await pool.query('SELECT * FROM polls WHERE id = $1', [pollId]);
-  
+export async function getPollResults(
+  pollId: string,
+  userId?: string,
+  userRole?: string // 'admin' | 'user'
+) {
+  // 1️⃣ Get poll
+  const poll = await pool.query(
+    'SELECT * FROM polls WHERE id = $1',
+    [pollId]
+  );
+
   if (poll.rows.length === 0) {
     throw { code: 'NOT_FOUND', message: 'Poll not found' };
   }
-  
+
   const p = poll.rows[0];
-  
-  const userVote = userId ? await pool.query(
-    'SELECT option_index FROM poll_votes WHERE poll_id = $1 AND user_id = $2',
-    [pollId, userId]
-  ) : null;
-  
-  const hasVoted = userVote && userVote.rows.length > 0;
-  
-  if (!hasVoted && !p.allow_view_results_before_vote) {
-    throw { code: 'VOTE_REQUIRED', message: 'You must vote to see results' };
+  const isAdmin = userRole === 'admin';
+
+  // 2️⃣ Get user vote (if user provided)
+  const userVote = userId
+    ? await pool.query(
+        'SELECT option_index FROM poll_votes WHERE poll_id = $1 AND user_id = $2',
+        [pollId, userId]
+      )
+    : null;
+
+  const hasVoted = !!(userVote && userVote.rows.length > 0);
+
+  /**
+   * 🔐 RESULT VISIBILITY RULES
+   * Admin can always view results
+   */
+  if (!isAdmin) {
+    if (!hasVoted && !p.allow_view_results_before_vote) {
+      throw {
+        code: 'VOTE_REQUIRED',
+        message: 'You must vote to see results'
+      };
+    }
+
+    if (hasVoted && !p.allow_view_results_after_vote) {
+      throw {
+        code: 'NOT_ALLOWED',
+        message: 'Results are not available'
+      };
+    }
   }
-  
-  if (!hasVoted && !p.allow_view_results_after_vote && !p.allow_view_results_before_vote) {
-    throw { code: 'VOTE_REQUIRED', message: 'Results are not available' };
-  }
-  
+
+  // 3️⃣ Get vote counts
   const votes = await pool.query(
-    'SELECT option_index, COUNT(*) as count FROM poll_votes WHERE poll_id = $1 GROUP BY option_index',
+    `SELECT option_index, COUNT(*) as count 
+     FROM poll_votes 
+     WHERE poll_id = $1 
+     GROUP BY option_index`,
     [pollId]
   );
-  
-  const totalVotes = votes.rows.reduce((sum, v) => sum + parseInt(v.count), 0);
+
+  const totalVotes = votes.rows.reduce(
+    (sum, v) => sum + parseInt(v.count, 10),
+    0
+  );
+
+  // 4️⃣ Format options with percentage
   const options = (p.options || []).map((opt: any, i: number) => {
-    const voteCount = votes.rows.find(v => parseInt(v.option_index) === i);
-    const count = voteCount ? parseInt(voteCount.count) : 0;
+    const voteRow = votes.rows.find(
+      v => parseInt(v.option_index, 10) === i
+    );
+
+    const count = voteRow ? parseInt(voteRow.count, 10) : 0;
+
     return {
       index: i,
       label: opt.label,
       color: opt.color,
       count,
-      percentage: totalVotes > 0 ? Math.round((count / totalVotes) * 100) : 0
+      percentage:
+        totalVotes > 0
+          ? Math.round((count / totalVotes) * 100)
+          : 0
     };
   });
-  
+
+  // 5️⃣ Return formatted response
   return {
     poll_id: pollId,
     total_votes: totalVotes,
@@ -305,7 +346,10 @@ export async function getPollResults(pollId: string, userId?: string) {
     user_vote: userVote?.rows[0]?.option_index,
     options,
     poll_status: p.status,
-    voting_open: new Date() <= new Date(p.end_date)
+    voting_open:
+      p.status === 'active' &&
+      new Date() >= new Date(p.start_date) &&
+      new Date() <= new Date(p.end_date)
   };
 }
 
