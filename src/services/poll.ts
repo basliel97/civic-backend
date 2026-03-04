@@ -91,6 +91,28 @@ export async function getPolls(userId?: string, userRegion?: string, userGender?
   return polls;
 }
 
+export async function getAllPollsForAdmin() {
+  const result = await pool.query(`
+    SELECT 
+      p.*,
+      (SELECT COUNT(*) FROM poll_votes WHERE poll_id = p.id) as vote_count
+    FROM polls p
+    ORDER BY p.created_at DESC
+  `);
+
+  const now = new Date();
+
+  return result.rows.map(poll => ({
+    ...poll,
+    vote_count: parseInt(poll.vote_count, 10),
+    voting_open:
+      poll.status === 'active' &&
+      now >= new Date(poll.start_date) &&
+      now <= new Date(poll.end_date),
+  }));
+}
+
+
 export async function getPollById(id: string, userId?: string) {
   const result = await pool.query('SELECT * FROM polls WHERE id = $1', [id]);
   if (!result.rows[0]) return null;

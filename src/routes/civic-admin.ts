@@ -4,7 +4,7 @@ import { config } from '../config/env.js';
 import { adminAuth, superAdminAuth, type AuthContext } from '../middleware/auth.js';
 import { getBannedWords, addBannedWord, deleteBannedWord, bulkAddBannedWords } from '../services/profanity.js';
 import { getForums, createForum, updateForum, deleteForum, togglePinPost, toggleLockPost } from '../services/forum.js';
-import { getPolls, getPollById, createPoll, updatePoll, deletePoll, getPollResults } from '../services/poll.js';
+import { getPolls, getPollById, createPoll, updatePoll, deletePoll, getPollResults, getAllPollsForAdmin } from '../services/poll.js';
 import { getReports, getReportById, resolveReport, rejectReport } from '../services/report.js';
 import { getBureaus, createBureau, updateBureau, deleteBureau, getSuggestions, getSuggestionById, respondToSuggestion } from '../services/suggestion.js';
 
@@ -169,7 +169,7 @@ civicAdmin.post('/posts/:id/lock', adminAuth(), async (c) => {
 
 civicAdmin.get('/polls', adminAuth(), async (c) => {
   try {
-    const polls = await getPolls();
+    const polls = await getAllPollsForAdmin();
     return c.json({ success: true, data: polls });
   } catch (error: any) {
     console.error('[Admin] Polls error:', error);
