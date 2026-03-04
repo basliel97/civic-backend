@@ -247,7 +247,9 @@ civicAdmin.delete('/polls/:id', adminAuth(), async (c) => {
 civicAdmin.get('/polls/:id/results', adminAuth(), async (c) => {
   try {
     const { id } = c.req.param();
-    const results = await getPollResults(id);
+
+    const results = await getPollResults(id, undefined, 'admin');
+
     return c.json({ success: true, data: results });
   } catch (error: any) {
     console.error('[Admin] Poll results error:', error);
