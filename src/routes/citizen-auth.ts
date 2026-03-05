@@ -69,6 +69,20 @@ citizenAuth.post("/initiate-register", async (c) => {
   }
 });
 
+
+citizenAuth.post("/kyc-preview", async (c) => {
+  try {
+    const { fin, otp } = await c.req.json();
+    // Verify with Fayda
+    const kycData = await FaydaService.verifyOtp(fin, otp);
+    
+    // Return the data to the frontend to show the "Preview" screen
+    return c.json({ success: true, data: kycData });
+  } catch (error: any) {
+    return c.json({ success: false, error: error.message }, 500);
+  }
+});
+
 /**
  * POST /citizen/complete-register
  * Complete registration after Fayda OTP verification
@@ -78,67 +92,59 @@ citizenAuth.post("/initiate-register", async (c) => {
  */
 citizenAuth.post("/complete-register", async (c) => {
   try {
-    const { fin, otp, phone, password, email } = await c.req.json();
+    const { fin, otp, password, email } = await c.req.json();
 
-    // Validate required inputs
-    if (!fin || !otp || !phone || !password) {
-      return c.json({ 
-        success: false, 
-        error: "FIN, OTP, phone, and password are required" 
-      }, 400);
+    if (!fin || !otp  || !password) {
+      return c.json({ success: false, error: "Missing required fields" }, 400);
     }
 
-    // Verify OTP with Fayda
+    // 1. Verify OTP with Fayda API
     const kycData = await FaydaService.verifyOtp(fin, otp);
+    const verifiedPhone = kycData.personalIdentity.phone; 
 
-    // Check if FIN already exists (using username field)
-    const existingUser = await pool.query(
-      'SELECT id FROM "user" WHERE username = $1',
-      [fin]
-    );
-
+    // 2. Check if user exists in Better Auth
+    const existingUser = await pool.query('SELECT id FROM "user" WHERE username = $1', [fin]);
     if (existingUser.rows.length > 0) {
-      return c.json({ 
-        success: false, 
-        error: "User already registered" 
-      }, 409);
+      return c.json({ success: false, error: "User already registered" }, 409);
     }
 
-    // Create user via Better Auth API
-    // Use username plugin - FIN becomes username, email is optional
-    const signUpBody: any = {
-      email: email || `${fin}@civic.local`, // Use fake email if not provided
-      password,
-      name: kycData.personalIdentity.fullName,
-    };
-    
+    // 3. Create Better Auth User
     const userResult = await auth.api.signUpEmail({
-      body: signUpBody,
+      body: { email: email || `${fin}@civic.local`, password, name: kycData.personalIdentity.fullName },
     });
 
-    if (!userResult || !userResult.user) {
-      throw new Error("Failed to create user");
-    }
+    if (!userResult || !userResult.user) throw new Error("Failed to create user");
 
-    // Update user with Fayda data and username
-   await pool.query(
+    // 4. Update Postgres with Hierarchical Data (Mapping Fayda -> Postgres)
+    await pool.query(
       `UPDATE "user" SET 
         username = $1,
         fin = $2,
-        phone_number = $3,
-        dob = $4,
-        gender = $5,
-        photo_url = $6,
-        role = 'citizen',
-        "emailVerified" = $7,
+        fan = $3,
+        phone_number = $4,
+        dob = $5,
+        dob_eth = $6,
+        gender = $7,
+        photo_url = $8,
+        region = $9,
+        sub_city = $10,
+        kebele = $11,
+        "emailVerified" = $12,
+        account_status = 'active',
         "updatedAt" = NOW()
-      WHERE id = $8`,[
+      WHERE id = $13`,
+      [
         fin,
         fin,
-        phone,
+        kycData.personalIdentity.fan, // 16-digit FAN
+        verifiedPhone,
         kycData.personalIdentity.dob,
+        kycData.personalIdentity.dobEth,
         kycData.personalIdentity.gender,
         kycData.biometrics?.face || null,
+        kycData.address.region,     // New field
+        kycData.address.woreda,     // Mapped to sub_city
+        kycData.address.kebele,     // New field
         email ? true : false,
         userResult.user.id,
       ]
@@ -147,23 +153,13 @@ citizenAuth.post("/complete-register", async (c) => {
     return c.json({
       success: true,
       message: "Registration successful",
-      user: {
-        id: userResult.user.id,
-        email: userResult.user.email,
-        name: userResult.user.name,
-        role: "citizen",
-      },
+      user: { id: userResult.user.id, name: userResult.user.name }
     });
-
   } catch (error: any) {
     console.error("[Citizen Auth] Complete register error:", error);
-    return c.json({ 
-      success: false, 
-      error: error.message || "Registration failed" 
-    }, 500);
+    return c.json({ success: false, error: error.message }, 500);
   }
 });
-
 /**
  * POST /citizen/login
  * Login with FIN or phone number
