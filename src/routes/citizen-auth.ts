@@ -3,6 +3,7 @@ import { auth } from "../auth/index.js";
 import { FaydaService } from "../services/fyda.js";
 import { Pool } from "pg";
 import { config } from "../config/env.js";
+import { any } from "better-auth";
 
 const pool = new Pool({
   connectionString: config.databaseUrl,
@@ -121,7 +122,7 @@ citizenAuth.post("/complete-register", async (c) => {
     }
 
     // Update user with Fayda data and username
-    await pool.query(
+   await pool.query(
       `UPDATE "user" SET 
         username = $1,
         fin = $2,
@@ -130,9 +131,9 @@ citizenAuth.post("/complete-register", async (c) => {
         gender = $5,
         photo_url = $6,
         role = 'citizen',
-        email_verified = $7
-      WHERE id = $8`,
-      [
+        "emailVerified" = $7,
+        "updatedAt" = NOW()
+      WHERE id = $8`,[
         fin,
         fin,
         phone,
@@ -403,6 +404,64 @@ citizenAuth.post("/reset-password", async (c) => {
       success: false, 
       error: error.message || "Password reset failed" 
     }, 500);
+  }
+});
+
+
+citizenAuth.get("/profile", async (c) => {
+  try {
+    const token = c.req.header('Authorization')?.replace('Bearer ', '');
+    if (!token) return c.json({ success: false, error: 'Unauthorized' }, 401);
+
+    const session = await pool.query('SELECT "userId", "expiresAt" FROM "session" WHERE token = $1', [token]);
+    if (session.rows.length === 0 || new Date(session.rows[0].expiresAt) < new Date()) {
+      return c.json({ success: false, error: 'Session expired' }, 401);
+    }
+
+    const user = await pool.query('SELECT * FROM "user" WHERE id = $1', [session.rows[0].userId]);
+    return c.json({ success: true, profile: user.rows[0] });
+  } catch (error: any) {
+    return c.json({ success: false, error: error.message }, 500);
+  }
+});
+
+/**
+ * PUT /citizen/profile
+ * Update citizen contact details
+ */
+citizenAuth.put("/profile", async (c) => {
+  try {
+    const token = c.req.header('Authorization')?.replace('Bearer ', '');
+    if (!token) return c.json({ success: false, error: 'Unauthorized' }, 401);
+
+    const session = await pool.query('SELECT "userId", "expiresAt" FROM "session" WHERE token = $1', [token]);
+    if (session.rows.length === 0) return c.json({ success: false, error: 'Unauthorized' }, 401);
+
+    const userId = session.rows[0].userId;
+    const { phone_number, region, sub_city, kebele, work_type, occupation } = await c.req.json();
+
+  const updates: string[] = [];
+const values: any[] =[];
+    const payload: any = { phone_number, region, sub_city, kebele, work_type, occupation };
+    
+    Object.keys(payload).forEach((key) => {
+      if (payload[key] !== undefined) {
+        values.push(payload[key]);
+        updates.push(`${key} = $${values.length}`);
+      }
+    });
+
+    if (updates.length === 0) return c.json({ success: true });
+
+    values.push(userId);
+    const result = await pool.query(
+      `UPDATE "user" SET ${updates.join(', ')} WHERE id = $${values.length} RETURNING *`,
+      values
+    );
+
+    return c.json({ success: true, profile: result.rows[0] });
+  } catch (error: any) {
+    return c.json({ success: false, error: error.message }, 500);
   }
 });
 
