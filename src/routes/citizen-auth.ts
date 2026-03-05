@@ -3,7 +3,6 @@ import { auth } from "../auth/index.js";
 import { FaydaService } from "../services/fyda.js";
 import { Pool } from "pg";
 import { config } from "../config/env.js";
-import { any } from "better-auth";
 
 const pool = new Pool({
   connectionString: config.databaseUrl,
