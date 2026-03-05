@@ -5,11 +5,9 @@ import { config } from '../config/env.js';
 const faydaClient = axios.create({
   baseURL: config.faydaUrl,
   headers: {
-    'User-Agent': 'Civic-Backend-App/1.0', // Tells Cloudflare you are a known service
-    'Content-Type': 'application/json',
-    'Accept': 'application/json'
-  },
-  timeout: 10000 // 10 seconds timeout
+    'User-Agent': 'Civic-Backend-App/1.0',
+    'x-internal-secret': process.env.INTERNAL_SECRET // Add this!
+  }
 });
 
 export const FaydaService = {
