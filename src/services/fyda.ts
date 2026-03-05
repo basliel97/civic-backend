@@ -40,17 +40,22 @@ export const FaydaService = {
       }
     }
   },
+kycPreview: async (fin: string, otp: string) => {
+    try {
+      const { data } = await faydaClient.post(`/api/kyc/preview`, { fin, otp });
+      return data; // Returns the preview data WITHOUT deleting the OTP
+    } catch (error: any) {
+      throw new Error(error.response?.data?.error || "Preview Failed");
+    }
+  },
 
-  /**
-   * Verify OTP with National ID System and get KYC Data
-   */
+  // Call this only when user clicks "Finalize Registration"
   verifyOtp: async (fin: string, otp: string) => {
     try {
       const { data } = await faydaClient.post(`/api/kyc/verify`, { fin, otp });
-      return data.kyc_data;
+      return data.kyc_data; // This endpoint STILL deletes the OTP
     } catch (error: any) {
-      console.error("Fayda Verification Failed:", error.response?.data || error.message);
-      throw new Error(error.response?.data?.error || "Fayda Validation Failed");
+      throw new Error(error.response?.data?.error || "Verification Failed");
     }
   }
 };
