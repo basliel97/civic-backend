@@ -116,7 +116,7 @@ citizenAuth.post("/complete-register", async (c) => {
     if (!userResult || !userResult.user) throw new Error("Failed to create user");
 
     // 4. Update Postgres with Hierarchical Data (Mapping Fayda -> Postgres)
-    await pool.query(
+     await pool.query(
       `UPDATE "user" SET 
         username = $1,
         fin = $2,
@@ -125,29 +125,30 @@ citizenAuth.post("/complete-register", async (c) => {
         dob = $5,
         dob_eth = $6,
         gender = $7,
-        photo_url = $8,
+        image = $8,        -- Changed from photo_url to image
         region = $9,
         sub_city = $10,
         kebele = $11,
         "emailVerified" = $12,
-        account_status = 'active',
+        status = 'active', -- Using standard status
         "updatedAt" = NOW()
       WHERE id = $13`,
       [
         fin,
         fin,
-        kycData.personalIdentity.fan, // 16-digit FAN
-        verifiedPhone,
+        kycData.personalIdentity.fan,
+        kycData.personalIdentity.phone,
         kycData.personalIdentity.dob,
         kycData.personalIdentity.dobEth,
         kycData.personalIdentity.gender,
-        kycData.biometrics?.face || null,
-        kycData.address.region,     // New field
-        kycData.address.woreda,     // Mapped to sub_city
-        kycData.address.kebele,     // New field
+        kycData.biometrics?.face || null, // Mapping to 'image'
+        kycData.address.region,
+        kycData.address.woreda,
+        kycData.address.kebele,
         email ? true : false,
         userResult.user.id,
       ]
+    
     );
 
     return c.json({

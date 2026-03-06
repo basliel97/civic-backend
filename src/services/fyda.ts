@@ -40,7 +40,8 @@ export const FaydaService = {
       }
     }
   },
-kycPreview: async (fin: string, otp: string) => {
+  
+  kycPreview: async (fin: string, otp: string) => {
     try {
       const { data } = await faydaClient.post(`/api/kyc/preview`, { fin, otp });
       return data; // Returns the preview data WITHOUT deleting the OTP
