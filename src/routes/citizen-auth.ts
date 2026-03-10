@@ -129,9 +129,9 @@ citizenAuth.post("/complete-register", async (c) => {
         region = $9,
         sub_city = $10,
         kebele = $11,
-        "emailVerified" = $12,
+        "email_verified" = $12,
         status = 'active', -- Using standard status
-        "updatedAt" = NOW()
+        "updated_at" = NOW()
       WHERE id = $13`,
       [
         fin,

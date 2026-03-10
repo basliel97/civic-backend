@@ -104,7 +104,7 @@ citizenManagement.post("/citizens", adminAuth(), async (c) => {
         const userId = userResult.rows[0].id;
         // Create account with password
         await pool.query(`INSERT INTO "account" (
-        id, "userId", "accountId", "providerId", password, "createdAt", "updatedAt"
+        id, "userId", "accountId", "providerId", password, "created_at", "updated_at"
       ) VALUES (
         gen_random_uuid(), $1, $2, 'credential', $3, NOW(), NOW()
       )`, [userId, userId, hashedPassword]);

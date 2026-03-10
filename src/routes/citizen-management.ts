@@ -49,7 +49,7 @@ citizenManagement.post("/citizens", adminAuth(), async (c) => {
       email,
       dob,
       gender,
-      photo_url
+      image
     } = await c.req.json();
 
     // Validate required fields
@@ -116,8 +116,8 @@ citizenManagement.post("/citizens", adminAuth(), async (c) => {
     const userResult = await pool.query(
       `INSERT INTO "user" (
         id, username, email, email_verified, name, role,
-        phone_number, fin, dob, gender, photo_url,
-        status, created_by, createdAt, updatedAt
+        phone_number, fin, dob, gender, image,
+        status, created_by, created_at, updated_at
       ) VALUES (
         gen_random_uuid(), $1, $2, $3, $4, 'citizen',
         $5, $6, $7, $8, $9,
@@ -132,7 +132,7 @@ citizenManagement.post("/citizens", adminAuth(), async (c) => {
         fin,                          // fin
         dob || null,                  // dob (optional)
         gender || null,               // gender (optional)
-        photo_url || null,            // photo_url (optional)
+        image || null,            // image (optional)
         adminId                       // created_by
       ]
     );
@@ -142,7 +142,7 @@ citizenManagement.post("/citizens", adminAuth(), async (c) => {
     // Create account with password
     await pool.query(
       `INSERT INTO "account" (
-        id, "userId", "accountId", "providerId", password, "createdAt", "updatedAt"
+        id, "userId", "accountId", "providerId", password, "created_at", "updated_at"
       ) VALUES (
         gen_random_uuid(), $1, $2, 'credential', $3, NOW(), NOW()
       )`,
@@ -152,7 +152,7 @@ citizenManagement.post("/citizens", adminAuth(), async (c) => {
     // Get full citizen data
     const citizenData = await pool.query(
       `SELECT id, username, name, email, phone_number, status,
-        createdAt, fin, dob, gender, photo_url
+        created_at, fin, dob, gender, image
       FROM "user" WHERE id = $1`,
       [userId]
     );
@@ -187,7 +187,7 @@ citizenManagement.get("/citizens", adminAuth(), async (c) => {
     
     // Filters
     const status = query.status || "all";
-    const sortBy = query.sortBy || "createdAt";
+    const sortBy = query.sortBy || "created_at";
     const sortOrder = query.sortOrder || "desc";
     const search = query.search || "";
     
@@ -212,8 +212,8 @@ citizenManagement.get("/citizens", adminAuth(), async (c) => {
     }
     
     // Validate sort column
-    const allowedSortColumns = ["createdAt", "name", "username", "last_login_at"];
-    const orderColumn = allowedSortColumns.includes(sortBy) ? sortBy : "createdAt";
+    const allowedSortColumns = ["created_at", "name", "username", "last_login_at"];
+    const orderColumn = allowedSortColumns.includes(sortBy) ? sortBy : "created_at";
     const orderDirection = sortOrder.toLowerCase() === "asc" ? "ASC" : "DESC";
     
     // Get total count
@@ -225,7 +225,7 @@ citizenManagement.get("/citizens", adminAuth(), async (c) => {
     const dataQuery = `
       SELECT 
         id, username, name, email, phone_number, status,
-        createdAt, updatedAt, last_login_at,
+        created_at, updated_at, last_login_at,
         fin, dob, gender, image
       FROM "user"
       ${whereClause}
@@ -272,8 +272,8 @@ citizenManagement.get("/citizens/:id", adminAuth(), async (c) => {
     const result = await pool.query(
       `SELECT 
         id, username, name, email, phone_number, status,
-        createdAt, updatedAt, deleted_at, last_login_at,
-        fin, dob, gender, photo_url,
+        created_at, updated_at, deleted_at, last_login_at,
+        fin, dob, gender, image,
         created_by, updated_by, deleted_by, deletion_reason,
         failed_login_attempts, locked_until
       FROM "user"
@@ -329,7 +329,7 @@ citizenManagement.put("/citizens/:id", adminAuth(), async (c) => {
     const updates = await c.req.json();
     
     // Allowed fields to update
-    const allowedFields = ['name', 'email', 'phone_number', 'dob', 'gender', 'photo_url'];
+    const allowedFields = ['name', 'email', 'phone_number', 'dob', 'gender', 'image'];
     const updateFields: string[] = [];
     const values: any[] = [];
     
@@ -349,14 +349,14 @@ citizenManagement.put("/citizens/:id", adminAuth(), async (c) => {
     
     // Add updated_by and updated_at
     updateFields.push(`updated_by = $${values.length + 1}`);
-    updateFields.push(`updatedAt = NOW()`);
+    updateFields.push(`updated_at = NOW()`);
     values.push(adminId, id);
     
     const query = `
       UPDATE "user"
       SET ${updateFields.join(', ')}
       WHERE id = $${values.length} AND role = 'citizen' AND deleted_at IS NULL
-      RETURNING id, username, name, email, phone_number, updatedAt
+      RETURNING id, username, name, email, phone_number, updated_at
     `;
     
     const result = await pool.query(query, values);
@@ -457,7 +457,7 @@ citizenManagement.patch("/citizens/:id/status", adminAuth(), async (c) => {
       SET 
         status = $1,
         updated_by = $2,
-        updatedAt = NOW()
+        updated_at = NOW()
       WHERE id = $3 AND role = 'citizen' AND deleted_at IS NULL
       RETURNING id, username, name, status`,
       [status, adminId, id]
@@ -562,7 +562,7 @@ citizenManagement.post("/citizens/bulk-status", adminAuth(), async (c) => {
       SET 
         status = $1,
         updated_by = $2,
-        updatedAt = NOW()
+        updated_at = NOW()
       WHERE id = ANY($3) AND role = 'citizen' AND deleted_at IS NULL
       RETURNING id`,
       [status, adminId, ids]
@@ -603,7 +603,7 @@ citizenManagement.post("/citizens/:id/restore", adminAuth(), superAdminAuth(), a
         deletion_reason = NULL,
         status = 'active',
         updated_by = $1,
-        updatedAt = NOW()
+        updated_at = NOW()
       WHERE id = $2 AND role = 'citizen' AND deleted_at IS NOT NULL
       RETURNING id, username, name`,
       [adminId, id]

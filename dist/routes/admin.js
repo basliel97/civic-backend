@@ -155,7 +155,7 @@ adminRoutes.post("/reset-citizen-password", adminAuth(), async (c) => {
         const accountResult = await pool.query('UPDATE "account" SET password = $1 WHERE "userId" = $2 RETURNING id', [hashedPassword, userId]);
         if (accountResult.rowCount === 0) {
             // Create account entry if doesn't exist
-            await pool.query('INSERT INTO "account" (id, "userId", "accountId", "providerId", password, "createdAt", "updatedAt") VALUES (gen_random_uuid(), $1, $2, $3, $4, NOW(), NOW())', [userId, userId, 'credential', hashedPassword]);
+            await pool.query('INSERT INTO "account" (id, "userId", "accountId", "providerId", password, "created_at", "updated_at") VALUES (gen_random_uuid(), $1, $2, $3, $4, NOW(), NOW())', [userId, userId, 'credential', hashedPassword]);
         }
         return c.json({
             success: true,
