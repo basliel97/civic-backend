@@ -117,7 +117,7 @@ citizenManagement.post("/citizens", adminAuth(), async (c) => {
       `INSERT INTO "user" (
         id, username, email, email_verified, name, role,
         phone_number, fin, dob, gender, photo_url,
-        status, created_by, created_at, updated_at
+        status, created_by, createdAt, updatedAt
       ) VALUES (
         gen_random_uuid(), $1, $2, $3, $4, 'citizen',
         $5, $6, $7, $8, $9,
@@ -152,7 +152,7 @@ citizenManagement.post("/citizens", adminAuth(), async (c) => {
     // Get full citizen data
     const citizenData = await pool.query(
       `SELECT id, username, name, email, phone_number, status,
-        created_at, fin, dob, gender, photo_url
+        createdAt, fin, dob, gender, photo_url
       FROM "user" WHERE id = $1`,
       [userId]
     );
@@ -187,7 +187,7 @@ citizenManagement.get("/citizens", adminAuth(), async (c) => {
     
     // Filters
     const status = query.status || "all";
-    const sortBy = query.sortBy || "created_at";
+    const sortBy = query.sortBy || "createdAt";
     const sortOrder = query.sortOrder || "desc";
     const search = query.search || "";
     
@@ -212,8 +212,8 @@ citizenManagement.get("/citizens", adminAuth(), async (c) => {
     }
     
     // Validate sort column
-    const allowedSortColumns = ["created_at", "name", "username", "last_login_at"];
-    const orderColumn = allowedSortColumns.includes(sortBy) ? sortBy : "created_at";
+    const allowedSortColumns = ["createdAt", "name", "username", "last_login_at"];
+    const orderColumn = allowedSortColumns.includes(sortBy) ? sortBy : "createdAt";
     const orderDirection = sortOrder.toLowerCase() === "asc" ? "ASC" : "DESC";
     
     // Get total count
@@ -225,8 +225,8 @@ citizenManagement.get("/citizens", adminAuth(), async (c) => {
     const dataQuery = `
       SELECT 
         id, username, name, email, phone_number, status,
-        created_at, updated_at, last_login_at,
-        fin, dob, gender, photo_url
+        createdAt, updatedAt, last_login_at,
+        fin, dob, gender, image
       FROM "user"
       ${whereClause}
       ORDER BY ${orderColumn} ${orderDirection}
@@ -272,7 +272,7 @@ citizenManagement.get("/citizens/:id", adminAuth(), async (c) => {
     const result = await pool.query(
       `SELECT 
         id, username, name, email, phone_number, status,
-        created_at, updated_at, deleted_at, last_login_at,
+        createdAt, updatedAt, deleted_at, last_login_at,
         fin, dob, gender, photo_url,
         created_by, updated_by, deleted_by, deletion_reason,
         failed_login_attempts, locked_until
@@ -349,14 +349,14 @@ citizenManagement.put("/citizens/:id", adminAuth(), async (c) => {
     
     // Add updated_by and updated_at
     updateFields.push(`updated_by = $${values.length + 1}`);
-    updateFields.push(`updated_at = NOW()`);
+    updateFields.push(`updatedAt = NOW()`);
     values.push(adminId, id);
     
     const query = `
       UPDATE "user"
       SET ${updateFields.join(', ')}
       WHERE id = $${values.length} AND role = 'citizen' AND deleted_at IS NULL
-      RETURNING id, username, name, email, phone_number, updated_at
+      RETURNING id, username, name, email, phone_number, updatedAt
     `;
     
     const result = await pool.query(query, values);
@@ -457,7 +457,7 @@ citizenManagement.patch("/citizens/:id/status", adminAuth(), async (c) => {
       SET 
         status = $1,
         updated_by = $2,
-        updated_at = NOW()
+        updatedAt = NOW()
       WHERE id = $3 AND role = 'citizen' AND deleted_at IS NULL
       RETURNING id, username, name, status`,
       [status, adminId, id]
@@ -562,7 +562,7 @@ citizenManagement.post("/citizens/bulk-status", adminAuth(), async (c) => {
       SET 
         status = $1,
         updated_by = $2,
-        updated_at = NOW()
+        updatedAt = NOW()
       WHERE id = ANY($3) AND role = 'citizen' AND deleted_at IS NULL
       RETURNING id`,
       [status, adminId, ids]
@@ -603,7 +603,7 @@ citizenManagement.post("/citizens/:id/restore", adminAuth(), superAdminAuth(), a
         deletion_reason = NULL,
         status = 'active',
         updated_by = $1,
-        updated_at = NOW()
+        updatedAt = NOW()
       WHERE id = $2 AND role = 'citizen' AND deleted_at IS NOT NULL
       RETURNING id, username, name`,
       [adminId, id]
