@@ -201,13 +201,15 @@ admin({
         },
       },
     },
-    session: {
-      create: {
-        after: async (session) => {
-         console.log(`[AUDIT] Session created for user: ${session.user_id}`);
-        },
-      },
+   session: {
+  create: {
+    after: async (session) => {
+      // Try camelCase first, fallback to snake_case
+      const userId = session.userId ?? session.user_id ?? "unknown";
+      console.log(`[AUDIT] Session created for user: ${userId}`);
     },
+  },
+},
   },
 });
 
