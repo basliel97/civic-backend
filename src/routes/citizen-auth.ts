@@ -409,12 +409,12 @@ citizenAuth.get("/profile", async (c) => {
     const token = c.req.header('Authorization')?.replace('Bearer ', '');
     if (!token) return c.json({ success: false, error: 'Unauthorized' }, 401);
 
-    const session = await pool.query('SELECT "userId", "expiresAt" FROM "session" WHERE token = $1', [token]);
-    if (session.rows.length === 0 || new Date(session.rows[0].expiresAt) < new Date()) {
+    const session = await pool.query('SELECT "user_id", "expires_at" FROM "session" WHERE token = $1', [token]);
+    if (session.rows.length === 0 || new Date(session.rows[0].expires_at) < new Date()) {
       return c.json({ success: false, error: 'Session expired' }, 401);
     }
 
-    const user = await pool.query('SELECT * FROM "user" WHERE id = $1', [session.rows[0].userId]);
+    const user = await pool.query('SELECT * FROM "user" WHERE id = $1', [session.rows[0].user_id]);
     return c.json({ success: true, profile: user.rows[0] });
   } catch (error: any) {
     return c.json({ success: false, error: error.message }, 500);
@@ -430,10 +430,10 @@ citizenAuth.put("/profile", async (c) => {
     const token = c.req.header('Authorization')?.replace('Bearer ', '');
     if (!token) return c.json({ success: false, error: 'Unauthorized' }, 401);
 
-    const session = await pool.query('SELECT "userId", "expiresAt" FROM "session" WHERE token = $1', [token]);
+    const session = await pool.query('SELECT "user_id", "expires_at" FROM "session" WHERE token = $1', [token]);
     if (session.rows.length === 0) return c.json({ success: false, error: 'Unauthorized' }, 401);
 
-    const userId = session.rows[0].userId;
+    const user_id = session.rows[0].user_id;
     const { phone_number, region, sub_city, kebele, work_type, occupation } = await c.req.json();
 
   const updates: string[] = [];
@@ -449,7 +449,7 @@ const values: any[] =[];
 
     if (updates.length === 0) return c.json({ success: true });
 
-    values.push(userId);
+    values.push(user_id);
     const result = await pool.query(
       `UPDATE "user" SET ${updates.join(', ')} WHERE id = $${values.length} RETURNING *`,
       values

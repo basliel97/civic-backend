@@ -39,7 +39,7 @@ export interface PollResults {
   }[];
 }
 
-export async function getPolls(userId?: string, userRegion?: string, userGender?: string, userWorkType?: string) {
+export async function getPolls(user_id?: string, userRegion?: string, userGender?: string, userWorkType?: string) {
   const now = new Date();
   
   let query = `
@@ -74,10 +74,10 @@ export async function getPolls(userId?: string, userRegion?: string, userGender?
     };
   });
   
-  if (userId) {
+  if (user_id) {
     const votes = await pool.query(
       'SELECT poll_id, option_index FROM poll_votes WHERE user_id = $1',
-      [userId]
+      [user_id]
     );
     const voteMap = new Map(votes.rows.map(v => [v.poll_id, v.option_index]));
     
@@ -113,16 +113,16 @@ export async function getAllPollsForAdmin() {
 }
 
 
-export async function getPollById(id: string, userId?: string) {
+export async function getPollById(id: string, user_id?: string) {
   const result = await pool.query('SELECT * FROM polls WHERE id = $1', [id]);
   if (!result.rows[0]) return null;
   
   const poll = result.rows[0];
   
-  if (userId) {
+  if (user_id) {
     const vote = await pool.query(
       'SELECT option_index FROM poll_votes WHERE poll_id = $1 AND user_id = $2',
-      [id, userId]
+      [id, user_id]
     );
     poll.has_voted = vote.rows.length > 0;
     poll.user_vote = vote.rows[0]?.option_index;
@@ -196,7 +196,7 @@ export async function deletePoll(id: string) {
   return result.rows[0];
 }
 
-export async function votePoll(pollId: string, userId: string, optionIndex: number, userRegion?: string, userGender?: string, userWorkType?: string) {
+export async function votePoll(pollId: string, user_id: string, optionIndex: number, userRegion?: string, userGender?: string, userWorkType?: string) {
   const poll = await pool.query('SELECT * FROM polls WHERE id = $1', [pollId]);
   
   if (poll.rows.length === 0) {
@@ -236,7 +236,7 @@ export async function votePoll(pollId: string, userId: string, optionIndex: numb
   
   const existingVote = await pool.query(
     'SELECT * FROM poll_votes WHERE poll_id = $1 AND user_id = $2',
-    [pollId, userId]
+    [pollId, user_id]
   );
   
   if (existingVote.rows.length > 0) {
@@ -250,7 +250,7 @@ export async function votePoll(pollId: string, userId: string, optionIndex: numb
   
   const result = await pool.query(
     'INSERT INTO poll_votes (poll_id, user_id, option_index) VALUES ($1, $2, $3) RETURNING *',
-    [pollId, userId, optionIndex]
+    [pollId, user_id, optionIndex]
   );
   
   return result.rows[0];
@@ -258,7 +258,7 @@ export async function votePoll(pollId: string, userId: string, optionIndex: numb
 
 export async function getPollResults(
   pollId: string,
-  userId?: string,
+  user_id?: string,
   userRole?: string // 'admin' | 'user'
 ) {
   // 1️⃣ Get poll
@@ -275,10 +275,10 @@ export async function getPollResults(
   const isAdmin = userRole === 'admin';
 
   // 2️⃣ Get user vote (if user provided)
-  const userVote = userId
+  const userVote = user_id
     ? await pool.query(
         'SELECT option_index FROM poll_votes WHERE poll_id = $1 AND user_id = $2',
-        [pollId, userId]
+        [pollId, user_id]
       )
     : null;
 

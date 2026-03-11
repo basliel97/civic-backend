@@ -27,8 +27,8 @@ export async function getSupabaseUsers() {
 /**
  * Get auth user details from Supabase Auth
  */
-export async function getSupabaseAuthUser(userId: string) {
-  const { data, error } = await supabaseAdmin.auth.admin.getUserById(userId);
+export async function getSupabaseAuthUser(user_id: string) {
+  const { data, error } = await supabaseAdmin.auth.admin.getUserById(user_id);
   
   if (error) {
     throw new Error(`Failed to fetch auth user: ${error.message}`);

@@ -56,16 +56,16 @@ export async function deleteBureau(id: string) {
   return result.rows[0];
 }
 
-export async function createSuggestion(userId: string, bureauId: string, subject: string, content: string) {
+export async function createSuggestion(user_id: string, bureauId: string, subject: string, content: string) {
   const result = await pool.query(
     `INSERT INTO suggestions (user_id, bureau_id, subject, content)
      VALUES ($1, $2, $3, $4) RETURNING *`,
-    [userId, bureauId, subject, content]
+    [user_id, bureauId, subject, content]
   );
   return result.rows[0];
 }
 
-export async function getMySuggestions(userId: string, page = 1, limit = 20) {
+export async function getMySuggestions(user_id: string, page = 1, limit = 20) {
   const offset = (page - 1) * limit;
   
   const result = await pool.query(
@@ -75,12 +75,12 @@ export async function getMySuggestions(userId: string, page = 1, limit = 20) {
      WHERE s.user_id = $1
      ORDER BY s.created_at DESC
      LIMIT $2 OFFSET $3`,
-    [userId, limit, offset]
+    [user_id, limit, offset]
   );
   
   const countResult = await pool.query(
     'SELECT COUNT(*) FROM suggestions WHERE user_id = $1',
-    [userId]
+    [user_id]
   );
   
   return {

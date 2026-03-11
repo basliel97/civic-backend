@@ -26,7 +26,7 @@ civicAdmin.get('/banned-words', adminAuth(), async (c) => {
 
 civicAdmin.post('/banned-words', adminAuth(), async (c) => {
   try {
-    const adminId = c.get('userId');
+    const adminId = c.get('user_id');
     const { word, severity, language } = await c.req.json();
     
     if (!word) {
@@ -59,7 +59,7 @@ civicAdmin.delete('/banned-words/:id', adminAuth(), async (c) => {
 
 civicAdmin.post('/banned-words/bulk', adminAuth(), async (c) => {
   try {
-    const adminId = c.get('userId');
+    const adminId = c.get('user_id');
     const { words } = await c.req.json();
     
     if (!Array.isArray(words) || words.length === 0) {
@@ -86,7 +86,7 @@ civicAdmin.get('/forums', adminAuth(), async (c) => {
 
 civicAdmin.post('/forums', adminAuth(), async (c) => {
   try {
-    const adminId = c.get('userId');
+    const adminId = c.get('user_id');
     const data = await c.req.json();
     
     if (!data.name) {
@@ -195,7 +195,7 @@ civicAdmin.get('/polls/:id', adminAuth(), async (c) => {
 
 civicAdmin.post('/polls', adminAuth(), async (c) => {
   try {
-    const adminId = c.get('userId');
+    const adminId = c.get('user_id');
     const data = await c.req.json();
     
     if (!data.title || !data.options || !data.start_date || !data.end_date) {
@@ -291,7 +291,7 @@ civicAdmin.get('/reports/:id', adminAuth(), async (c) => {
 civicAdmin.put('/reports/:id/resolve', adminAuth(), async (c) => {
   try {
     const { id } = c.req.param();
-    const adminId = c.get('userId');
+    const adminId = c.get('user_id');
     const { resolution } = await c.req.json();
     
     if (!resolution) {
@@ -407,7 +407,7 @@ civicAdmin.get('/suggestions/:id', adminAuth(), async (c) => {
 civicAdmin.post('/suggestions/:id/respond', adminAuth(), async (c) => {
   try {
     const { id } = c.req.param();
-    const adminId = c.get('userId');
+    const adminId = c.get('user_id');
     const { response } = await c.req.json();
     
     if (!response) {

@@ -49,7 +49,7 @@ export interface Reply {
   user_name?: string;
 }
 
-export async function getForums(userId?: string, userRegion?: string, userWorkType?: string) {
+export async function getForums(user_id?: string, userRegion?: string, userWorkType?: string) {
   let query = `
     SELECT f.*, 
       (SELECT COUNT(*) FROM posts WHERE forum_id = f.id AND status = 'active') as post_count
@@ -167,7 +167,7 @@ export async function getPostById(id: string) {
   return result.rows[0];
 }
 
-export async function createPost(forumId: string, userId: string, title: string, content: string) {
+export async function createPost(forumId: string, user_id: string, title: string, content: string) {
   const profanityCheck = await checkProfanity(title + ' ' + content);
   
   if (!profanityCheck.isClean) {
@@ -181,17 +181,17 @@ export async function createPost(forumId: string, userId: string, title: string,
   
   const result = await pool.query(
     `INSERT INTO posts (forum_id, user_id, title, content) VALUES ($1, $2, $3, $4) RETURNING *`,
-    [forumId, userId, title, content]
+    [forumId, user_id, title, content]
   );
   return result.rows[0];
 }
 
-export async function updatePost(id: string, userId: string, data: { title?: string; content?: string }, isAdmin: boolean) {
+export async function updatePost(id: string, user_id: string, data: { title?: string; content?: string }, isAdmin: boolean) {
   const post = await pool.query('SELECT * FROM posts WHERE id = $1', [id]);
   
   if (post.rows.length === 0) return null;
   
-  if (!isAdmin && post.rows[0].user_id !== userId) {
+  if (!isAdmin && post.rows[0].user_id !== user_id) {
     throw { code: 'UNAUTHORIZED', message: 'You can only edit your own posts' };
   }
   
@@ -233,15 +233,15 @@ export async function updatePost(id: string, userId: string, data: { title?: str
   return result.rows[0];
 }
 
-export async function deletePost(id: string, userId: string, userRole: string) {
+export async function deletePost(id: string, user_id: string, userRole: string) {
   const post = await pool.query('SELECT * FROM posts WHERE id = $1', [id]);
   
   if (post.rows.length === 0) return null;
   
-  if (userRole !== 'admin' && userRole !== 'super_admin' && post.rows[0].user_id !== userId) {
+  if (userRole !== 'admin' && userRole !== 'super_admin' && post.rows[0].user_id !== user_id) {
     const isMod = await pool.query(
       'SELECT * FROM forum_mods WHERE forum_id = $1 AND user_id = $2',
-      [post.rows[0].forum_id, userId]
+      [post.rows[0].forum_id, user_id]
     );
     if (isMod.rows.length === 0) {
       throw { code: 'UNAUTHORIZED', message: 'You cannot delete this post' };
@@ -270,7 +270,7 @@ export async function getReplies(postId: string, page = 1, limit = 50) {
   return result.rows;
 }
 
-export async function createReply(postId: string, userId: string, content: string) {
+export async function createReply(postId: string, user_id: string, content: string) {
   const post = await pool.query('SELECT * FROM posts WHERE id = $1', [postId]);
   
   if (post.rows.length === 0) throw { code: 'NOT_FOUND', message: 'Post not found' };
@@ -292,7 +292,7 @@ export async function createReply(postId: string, userId: string, content: strin
     
     const result = await client.query(
       `INSERT INTO replies (post_id, user_id, content) VALUES ($1, $2, $3) RETURNING *`,
-      [postId, userId, content]
+      [postId, user_id, content]
     );
     
     await client.query(
@@ -310,12 +310,12 @@ export async function createReply(postId: string, userId: string, content: strin
   }
 }
 
-export async function deleteReply(id: string, userId: string, userRole: string) {
+export async function deleteReply(id: string, user_id: string, userRole: string) {
   const reply = await pool.query('SELECT * FROM replies WHERE id = $1', [id]);
   
   if (reply.rows.length === 0) return null;
   
-  if (userRole !== 'admin' && userRole !== 'super_admin' && reply.rows[0].user_id !== userId) {
+  if (userRole !== 'admin' && userRole !== 'super_admin' && reply.rows[0].user_id !== user_id) {
     throw { code: 'UNAUTHORIZED', message: 'You cannot delete this reply' };
   }
   

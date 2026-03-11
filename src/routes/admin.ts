@@ -99,7 +99,7 @@ adminRoutes.post("/change-password", adminAuth(), async (c) => {
     
     // Get user from session
     const sessionResult = await pool.query(
-      'SELECT "userId" FROM "session" WHERE token = $1',
+      'SELECT "user_id" FROM "session" WHERE token = $1',
       [token]
     );
 
@@ -110,12 +110,12 @@ adminRoutes.post("/change-password", adminAuth(), async (c) => {
       }, 401);
     }
 
-    const userId = sessionResult.rows[0].userId;
+    const user_id = sessionResult.rows[0].user_id;
 
     // Verify current password
     const userResult = await pool.query(
-      'SELECT "userId", password FROM "account" WHERE "userId" = $1 AND "providerId" = $2',
-      [userId, 'credential']
+      'SELECT "user_id", password FROM "account" WHERE "user_id" = $1 AND "providerId" = $2',
+      [user_id, 'credential']
     );
 
     if (userResult.rows.length === 0) {
@@ -140,8 +140,8 @@ adminRoutes.post("/change-password", adminAuth(), async (c) => {
 
     // Update password
     await pool.query(
-      'UPDATE "account" SET password = $1 WHERE "userId" = $2',
-      [hashedPassword, userId]
+      'UPDATE "account" SET password = $1 WHERE "user_id" = $2',
+      [hashedPassword, user_id]
     );
 
     return c.json({ 
@@ -164,9 +164,9 @@ adminRoutes.post("/change-password", adminAuth(), async (c) => {
  */
 adminRoutes.post("/reset-citizen-password", adminAuth(), async (c) => {
   try {
-    const { userId, newPassword } = await c.req.json();
+    const { user_id, newPassword } = await c.req.json();
 
-    if (!userId || !newPassword) {
+    if (!user_id || !newPassword) {
       return c.json({ 
         success: false, 
         error: "User ID and new password are required" 
@@ -176,7 +176,7 @@ adminRoutes.post("/reset-citizen-password", adminAuth(), async (c) => {
     // Check if user exists and is a citizen
     const userCheck = await pool.query(
       'SELECT role FROM "user" WHERE id = $1',
-      [userId]
+      [user_id]
     );
 
     if (userCheck.rows.length === 0) {
@@ -198,15 +198,15 @@ adminRoutes.post("/reset-citizen-password", adminAuth(), async (c) => {
 
     // Update password in account table
     const accountResult = await pool.query(
-      'UPDATE "account" SET password = $1 WHERE "userId" = $2 RETURNING id',
-      [hashedPassword, userId]
+      'UPDATE "account" SET password = $1 WHERE "user_id" = $2 RETURNING id',
+      [hashedPassword, user_id]
     );
 
     if (accountResult.rowCount === 0) {
       // Create account entry if doesn't exist
       await pool.query(
-        'INSERT INTO "account" (id, "userId", "accountId", "providerId", password, "created_at", "updated_at") VALUES (gen_random_uuid(), $1, $2, $3, $4, NOW(), NOW())',
-        [userId, userId, 'credential', hashedPassword]
+        'INSERT INTO "account" (id, "user_id", "accountId", "providerId", password, "created_at", "updated_at") VALUES (gen_random_uuid(), $1, $2, $3, $4, NOW(), NOW())',
+        [user_id, user_id, 'credential', hashedPassword]
       );
     }
 

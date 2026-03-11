@@ -20,7 +20,7 @@ export const adminAuth = () => createMiddleware(async (c, next) => {
     const token = authHeader.replace('Bearer ', '');
     try {
         // Get session from database
-        const sessionResult = await pool.query('SELECT "userId", "expiresAt" FROM "session" WHERE token = $1', [token]);
+        const sessionResult = await pool.query('SELECT "user_id", "expires_at" FROM "session" WHERE token = $1', [token]);
         if (sessionResult.rows.length === 0) {
             return c.json({
                 success: false,
@@ -29,14 +29,14 @@ export const adminAuth = () => createMiddleware(async (c, next) => {
         }
         const session = sessionResult.rows[0];
         // Check if session expired
-        if (new Date(session.expiresAt) < new Date()) {
+        if (new Date(session.expires_at) < new Date()) {
             return c.json({
                 success: false,
                 error: 'Session expired'
             }, 401);
         }
         // Get user details
-        const userResult = await pool.query('SELECT id, email, name, role, status FROM "user" WHERE id = $1', [session.userId]);
+        const userResult = await pool.query('SELECT id, email, name, role, status FROM "user" WHERE id = $1', [session.user_id]);
         if (userResult.rows.length === 0) {
             return c.json({
                 success: false,
@@ -62,7 +62,7 @@ export const adminAuth = () => createMiddleware(async (c, next) => {
         await pool.query('UPDATE "user" SET "last_login_at" = NOW() WHERE id = $1', [user.id]);
         // Set user in context
         c.set('user', user);
-        c.set('userId', user.id);
+        c.set('user_id', user.id);
         c.set('userRole', user.role);
         await next();
     }
@@ -93,9 +93,9 @@ export const superAdminAuth = () => createMiddleware(async (c, next) => {
  * Checks if user account is active (not deleted or inactive)
  */
 export const activeUser = () => createMiddleware(async (c, next) => {
-    const userId = c.get('userId');
+    const user_id = c.get('user_id');
     try {
-        const result = await pool.query('SELECT status, deleted_at FROM "user" WHERE id = $1', [userId]);
+        const result = await pool.query('SELECT status, deleted_at FROM "user" WHERE id = $1', [user_id]);
         if (result.rows.length === 0) {
             return c.json({
                 success: false,

@@ -494,7 +494,7 @@ curl -X POST "http://localhost:4000/api/admin/change-password" \
 **Request Body:**
 ```json
 {
-  "userId": "citizen-uuid",
+  "user_id": "citizen-uuid",
   "newPassword": "TempPass123!"
 }
 ```
@@ -507,7 +507,7 @@ curl -X POST "http://localhost:4000/api/admin/reset-citizen-password" \
   -H "Authorization: Bearer YOUR_TOKEN" \
   -H "Content-Type: application/json" \
   -d '{
-    "userId": "123e4567-e89b-12d3-a456-426614174000",
+    "user_id": "123e4567-e89b-12d3-a456-426614174000",
     "newPassword": "NewTempPass123!"
   }'
 ```

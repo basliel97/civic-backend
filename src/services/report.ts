@@ -9,14 +9,14 @@ export async function createReport(
   itemId: string,
   itemType: string,
   itemTitle: string,
-  userId: string,
+  user_id: string,
   reason: string,
   description?: string
 ) {
   const result = await pool.query(
     `INSERT INTO reports (item_id, item_type, item_title, user_id, reason, description)
      VALUES ($1, $2, $3, $4, $5, $6) RETURNING *`,
-    [itemId, itemType, itemTitle, userId, reason, description || null]
+    [itemId, itemType, itemTitle, user_id, reason, description || null]
   );
   return result.rows[0];
 }
@@ -83,10 +83,10 @@ export async function rejectReport(id: string) {
   return result.rows[0];
 }
 
-export async function getUserReports(userId: string) {
+export async function getUserReports(user_id: string) {
   const result = await pool.query(
     `SELECT * FROM reports WHERE user_id = $1 ORDER BY created_at DESC`,
-    [userId]
+    [user_id]
   );
   return result.rows;
 }

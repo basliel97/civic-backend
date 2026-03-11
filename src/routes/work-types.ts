@@ -21,7 +21,7 @@ workTypes.get('/work-types', async (c) => {
 
 workTypes.post('/work-types', adminAuth(), async (c) => {
   try {
-    const adminId = c.get('userId');
+    const adminId = c.get('user_id');
     const { name, category } = await c.req.json();
     
     if (!name) {

@@ -15,7 +15,7 @@ export type AuthContext = {
     role: string;
     status: string;
   };
-  userId: string;
+  user_id: string;
   userRole: string;
 };
 
@@ -39,7 +39,7 @@ export const adminAuth = () => createMiddleware<{ Variables: AuthContext }>(asyn
   try {
     // Get session from database
     const sessionResult = await pool.query(
-      'SELECT "userId", "expiresAt" FROM "session" WHERE token = $1',
+      'SELECT "user_id", "expires_at" FROM "session" WHERE token = $1',
       [token]
     );
 
@@ -53,7 +53,7 @@ export const adminAuth = () => createMiddleware<{ Variables: AuthContext }>(asyn
     const session = sessionResult.rows[0];
     
     // Check if session expired
-    if (new Date(session.expiresAt) < new Date()) {
+    if (new Date(session.expires_at) < new Date()) {
       return c.json({ 
         success: false, 
         error: 'Session expired' 
@@ -63,7 +63,7 @@ export const adminAuth = () => createMiddleware<{ Variables: AuthContext }>(asyn
     // Get user details
     const userResult = await pool.query(
       'SELECT id, email, name, role, status FROM "user" WHERE id = $1',
-      [session.userId]
+      [session.user_id]
     );
 
     if (userResult.rows.length === 0) {
@@ -99,7 +99,7 @@ export const adminAuth = () => createMiddleware<{ Variables: AuthContext }>(asyn
 
     // Set user in context
     c.set('user', user);
-    c.set('userId', user.id);
+    c.set('user_id', user.id);
     c.set('userRole', user.role);
 
     await next();
@@ -134,12 +134,12 @@ export const superAdminAuth = () => createMiddleware<{ Variables: AuthContext }>
  * Checks if user account is active (not deleted or inactive)
  */
 export const activeUser = () => createMiddleware<{ Variables: AuthContext }>(async (c, next) => {
-  const userId = c.get('userId');
+  const user_id = c.get('user_id');
   
   try {
     const result = await pool.query(
       'SELECT status, deleted_at FROM "user" WHERE id = $1',
-      [userId]
+      [user_id]
     );
 
     if (result.rows.length === 0) {

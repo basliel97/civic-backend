@@ -170,7 +170,7 @@ export const auth = betterAuth({
         session: {
             create: {
                 after: async (session) => {
-                    console.log(`[AUDIT] Session created for user: ${session.userId}`);
+                    console.log(`[AUDIT] Session created for user: ${session.user_id}`);
                 },
             },
         },

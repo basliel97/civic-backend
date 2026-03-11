@@ -205,8 +205,8 @@ admin({
   create: {
     after: async (session) => {
       // Try camelCase first, fallback to snake_case
-      const userId = session.userId ?? session.user_id ?? "unknown";
-      console.log(`[AUDIT] Session created for user: ${userId}`);
+      const user_id = session.user_id ?? session.user_id ?? "unknown";
+      console.log(`[AUDIT] Session created for user: ${user_id}`);
     },
   },
 },

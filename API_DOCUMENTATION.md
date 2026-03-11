@@ -101,13 +101,13 @@ Better Auth provides these endpoints automatically at `/api/auth/*`:
 **POST** `/api/auth/admin/update-user`
 - Update user details
 - Headers: `Authorization: Bearer <admin_token>`
-- Body: `{ userId: string, ...updates }`
+- Body: `{ user_id: string, ...updates }`
 - Returns: `{ user: User }`
 
 **POST** `/api/auth/admin/set-role`
 - Change user role (super_admin only)
 - Headers: `Authorization: Bearer <super_admin_token>`
-- Body: `{ userId: string, role: "citizen" | "admin" | "super_admin" }`
+- Body: `{ user_id: string, role: "citizen" | "admin" | "super_admin" }`
 - Returns: `{ user: User }`
 
 ---

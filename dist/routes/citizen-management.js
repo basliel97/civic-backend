@@ -36,7 +36,7 @@ const buildSearchQuery = (search) => {
  */
 citizenManagement.post("/citizens", adminAuth(), async (c) => {
     try {
-        const adminId = c.get('userId');
+        const adminId = c.get('user_id');
         const { fin, name, phone, password, email, dob, gender, photo_url } = await c.req.json();
         // Validate required fields
         if (!fin || !name || !phone || !password) {
@@ -101,17 +101,17 @@ citizenManagement.post("/citizens", adminAuth(), async (c) => {
             photo_url || null, // photo_url (optional)
             adminId // created_by
         ]);
-        const userId = userResult.rows[0].id;
+        const user_id = userResult.rows[0].id;
         // Create account with password
         await pool.query(`INSERT INTO "account" (
-        id, "userId", "accountId", "providerId", password, "created_at", "updated_at"
+        id, "user_id", "accountId", "providerId", password, "created_at", "updated_at"
       ) VALUES (
         gen_random_uuid(), $1, $2, 'credential', $3, NOW(), NOW()
-      )`, [userId, userId, hashedPassword]);
+      )`, [user_id, user_id, hashedPassword]);
         // Get full citizen data
         const citizenData = await pool.query(`SELECT id, username, name, email, phone_number, status,
         created_at, fin, dob, gender, photo_url
-      FROM "user" WHERE id = $1`, [userId]);
+      FROM "user" WHERE id = $1`, [user_id]);
         return c.json({
             success: true,
             message: "Citizen created successfully",
@@ -255,7 +255,7 @@ citizenManagement.get("/citizens/:id", adminAuth(), async (c) => {
 citizenManagement.put("/citizens/:id", adminAuth(), async (c) => {
     try {
         const { id } = c.req.param();
-        const adminId = c.get('userId');
+        const adminId = c.get('user_id');
         const updates = await c.req.json();
         // Allowed fields to update
         const allowedFields = ['name', 'email', 'phone_number', 'dob', 'gender', 'photo_url'];
@@ -311,7 +311,7 @@ citizenManagement.put("/citizens/:id", adminAuth(), async (c) => {
 citizenManagement.delete("/citizens/:id", adminAuth(), async (c) => {
     try {
         const { id } = c.req.param();
-        const adminId = c.get('userId');
+        const adminId = c.get('user_id');
         const { reason } = await c.req.json();
         // Check if trying to delete self
         if (id === adminId) {
@@ -355,7 +355,7 @@ citizenManagement.delete("/citizens/:id", adminAuth(), async (c) => {
 citizenManagement.patch("/citizens/:id/status", adminAuth(), async (c) => {
     try {
         const { id } = c.req.param();
-        const adminId = c.get('userId');
+        const adminId = c.get('user_id');
         const { status, reason } = await c.req.json();
         if (!['active', 'inactive'].includes(status)) {
             return c.json({
@@ -396,7 +396,7 @@ citizenManagement.patch("/citizens/:id/status", adminAuth(), async (c) => {
  */
 citizenManagement.post("/citizens/bulk-delete", adminAuth(), async (c) => {
     try {
-        const adminId = c.get('userId');
+        const adminId = c.get('user_id');
         const { ids, reason } = await c.req.json();
         if (!Array.isArray(ids) || ids.length === 0) {
             return c.json({
@@ -437,7 +437,7 @@ citizenManagement.post("/citizens/bulk-delete", adminAuth(), async (c) => {
  */
 citizenManagement.post("/citizens/bulk-status", adminAuth(), async (c) => {
     try {
-        const adminId = c.get('userId');
+        const adminId = c.get('user_id');
         const { ids, status } = await c.req.json();
         if (!Array.isArray(ids) || ids.length === 0) {
             return c.json({
@@ -482,7 +482,7 @@ citizenManagement.post("/citizens/bulk-status", adminAuth(), async (c) => {
 citizenManagement.post("/citizens/:id/restore", adminAuth(), superAdminAuth(), async (c) => {
     try {
         const { id } = c.req.param();
-        const adminId = c.get('userId');
+        const adminId = c.get('user_id');
         const result = await pool.query(`UPDATE "user"
       SET 
         deleted_at = NULL,
