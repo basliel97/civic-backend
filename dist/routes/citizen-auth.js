@@ -106,7 +106,7 @@ citizenAuth.post("/complete-register", async (c) => {
         gender = $5,
         photo_url = $6,
         role = 'citizen',
-        emailVerified = $7
+        email_verified = $7
       WHERE id = $8`, [
             fin,
             fin,

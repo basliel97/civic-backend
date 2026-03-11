@@ -115,7 +115,7 @@ citizenManagement.post("/citizens", adminAuth(), async (c) => {
     // Create user with all information
     const userResult = await pool.query(
       `INSERT INTO "user" (
-        id, username, email, emailVerified, name, role,
+        id, username, email, email_verified, name, role,
         phone_number, fin, dob, gender, image,
         status, created_by, created_at, updated_at
       ) VALUES (
@@ -126,7 +126,7 @@ citizenManagement.post("/citizens", adminAuth(), async (c) => {
       [
         fin,                          // username = FIN
         email || null,                // email (optional)
-        email ? true : false,         // emailVerified
+        email ? true : false,         // email_verified
         name,                         // name
         phone,                        // phone_number
         fin,                          // fin

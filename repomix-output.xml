@@ -824,7 +824,7 @@ export async function migrateUserToBetterAuth(profile: any) {
     const result = await pool.query(
       `
       INSERT INTO "user" (
-        id, email, emailVerified, name, role, 
+        id, email, email_verified, name, role, 
         created_at, updated_at,
         fin, phone_number, dob, gender, photo_url,
         failed_login_attempts, locked_until
@@ -2018,7 +2018,7 @@ citizenManagement.post("/citizens", adminAuth(), async (c) => {
     // Create user with all information
     const userResult = await pool.query(
       `INSERT INTO "user" (
-        id, username, email, emailVerified, name, role,
+        id, username, email, email_verified, name, role,
         phone_number, fin, dob, gender, photo_url,
         status, created_by, created_at, updated_at
       ) VALUES (
@@ -2029,7 +2029,7 @@ citizenManagement.post("/citizens", adminAuth(), async (c) => {
       [
         fin,                          // username = FIN
         email || null,                // email (optional)
-        email ? true : false,         // emailVerified
+        email ? true : false,         // email_verified
         name,                         // name
         phone,                        // phone_number
         fin,                          // fin
@@ -6478,7 +6478,7 @@ citizenAuth.post("/complete-register", async (c) => {
         gender = $5,
         photo_url = $6,
         role = 'citizen',
-        emailVerified = $7
+        email_verified = $7
       WHERE id = $8`,
       [
         fin,
