@@ -65,7 +65,7 @@ export async function migrateUserToBetterAuth(profile: any) {
     const result = await pool.query(
       `
       INSERT INTO "user" (
-        id, email, email_verified, name, role, 
+        id, email, emailVerified, name, role, 
         created_at, updated_at,
         fin, phone_number, dob, gender, photo_url,
         failed_login_attempts, locked_until
