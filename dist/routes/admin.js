@@ -90,7 +90,7 @@ adminRoutes.post("/change-password", adminAuth(), async (c) => {
         }
         const user_id = sessionResult.rows[0].user_id;
         // Verify current password
-        const userResult = await pool.query('SELECT "user_id", password FROM "account" WHERE "user_id" = $1 AND "providerId" = $2', [user_id, 'credential']);
+        const userResult = await pool.query('SELECT "user_id", password FROM "account" WHERE "user_id" = $1 AND "provider_id" = $2', [user_id, 'credential']);
         if (userResult.rows.length === 0) {
             return c.json({
                 success: false,
@@ -155,7 +155,7 @@ adminRoutes.post("/reset-citizen-password", adminAuth(), async (c) => {
         const accountResult = await pool.query('UPDATE "account" SET password = $1 WHERE "user_id" = $2 RETURNING id', [hashedPassword, user_id]);
         if (accountResult.rowCount === 0) {
             // Create account entry if doesn't exist
-            await pool.query('INSERT INTO "account" (id, "user_id", "accountId", "providerId", password, "created_at", "updated_at") VALUES (gen_random_uuid(), $1, $2, $3, $4, NOW(), NOW())', [user_id, user_id, 'credential', hashedPassword]);
+            await pool.query('INSERT INTO "account" (id, "user_id", "account_id", "provider_id", password, "created_at", "updated_at") VALUES (gen_random_uuid(), $1, $2, $3, $4, NOW(), NOW())', [user_id, user_id, 'credential', hashedPassword]);
         }
         return c.json({
             success: true,
