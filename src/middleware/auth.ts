@@ -14,9 +14,11 @@ export type AuthContext = {
     name: string;
     role: string;
     status: string;
+      bureau_id?: string | null;
   };
   user_id: string;
   userRole: string;
+  bureauId?: string | null;
 };
 
 /**
@@ -62,7 +64,7 @@ export const adminAuth = () => createMiddleware<{ Variables: AuthContext }>(asyn
 
     // Get user details
     const userResult = await pool.query(
-      'SELECT id, email, name, role, status FROM "user" WHERE id = $1',
+      'SELECT id, email, name, role, status, bureau_id FROM "user" WHERE id = $1',
       [session.user_id]
     );
 
@@ -101,6 +103,8 @@ export const adminAuth = () => createMiddleware<{ Variables: AuthContext }>(asyn
     c.set('user', user);
     c.set('user_id', user.id);
     c.set('userRole', user.role);
+     c.set('bureauId', user.bureau_id); 
+
 
     await next();
   } catch (error) {
@@ -112,6 +116,56 @@ export const adminAuth = () => createMiddleware<{ Variables: AuthContext }>(asyn
   }
 });
 
+
+export const agencyAuth = (bureauName: string) => createMiddleware<{ Variables: AuthContext }>(async (c, next) => {
+  const user = c.get('user');
+  const userRole = c.get('userRole');
+  const bureauId = c.get('bureauId');
+
+  // A. If Global Super Admin (No bureau assigned), they can see everything
+  if (userRole === 'super_admin' && !bureauId) {
+    return await next();
+  }
+
+  // B. If they have a bureau, check if it matches the name of the agency
+  if (bureauId) {
+    const res = await pool.query('SELECT name FROM bureaus WHERE id = $1', [bureauId]);
+    const currentBureauName = res.rows[0]?.name;
+
+    if (currentBureauName === bureauName) {
+      return await next();
+    }
+  }
+
+  return c.json({ 
+    success: false, 
+    error: `Forbidden: This dashboard is only for ${bureauName} staff.` 
+  }, 403);
+});
+
+
+
+/**
+ * Global Super Admin Authorization
+ * Only for the system-wide admin who manages bureaus and civic engagement.
+ */
+export const globalSuperAdminAuth = () => createMiddleware<{ Variables: AuthContext }>(async (c, next) => {
+  const userRole = c.get('userRole');
+  const bureauId = c.get('bureauId');
+  
+  // We check if bureauId is "falsy" (null, undefined, or empty)
+  const isGlobal = !bureauId; 
+
+  if (userRole !== 'super_admin' || !isGlobal) {
+    return c.json({ 
+      success: false, 
+      error: "Unauthorized: Global Super Admin only",
+      debug: { role: userRole, bureauId: bureauId } // This helps you see what's wrong if it fails
+    }, 403);
+  }
+
+  await next();
+});
 /**
  * Super Admin Authorization Middleware
  * Verifies user is super_admin

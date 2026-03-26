@@ -203,7 +203,7 @@ Login with FIN or phone number.
   "password": "SecurePass123!"
 }
 ```
-
+ 
 *Note: `loginInput` can be FIN (12 digits) or phone number*
 
 **Response (Success):**
