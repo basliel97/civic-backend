@@ -485,6 +485,8 @@ Soft-deletes an application by changing its status to cancelled.
 
 Both citizens and admins can communicate through application-specific comments.
 
+**Note:** All chat messages are automatically sanitized to prevent XSS attacks. HTML tags are stripped from message content before storage.
+
 ### Citizen Chat Endpoints
 
 #### Post a Comment (Citizen)

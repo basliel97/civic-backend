@@ -522,6 +522,40 @@ curl -X POST "http://localhost:4000/api/admin/reset-citizen-password" \
 
 ---
 
+### 12. Admin: Forgot Password (No Auth Required)
+
+**POST** `/admin/forgot-password`
+
+Request a password reset email for admin accounts. This endpoint does **not** require authentication since users requesting password resets are typically locked out.
+
+**Request Body:**
+```json
+{
+  "email": "admin@example.com"
+}
+```
+
+**Example Request:**
+```bash
+curl -X POST "http://localhost:4000/api/admin/forgot-password" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "email": "admin@example.com"
+  }'
+```
+
+**Example Response:**
+```json
+{
+  "success": true,
+  "message": "If an account exists, a reset link has been sent."
+}
+```
+
+**Note:** For security, this endpoint always returns success even if the email doesn't exist, to prevent email enumeration attacks.
+
+---
+
 ## Citizen Status Flow
 
 ```

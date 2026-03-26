@@ -81,7 +81,7 @@ Better Auth provides these endpoints automatically at `/api/auth/*`:
 **POST** `/api/auth/admin/create-user`
 - Create new user (admin only)
 - Headers: `Authorization: Bearer <admin_token>`
-- Body: 
+- Body:
   ```json
   {
     "email": "user@example.com",
@@ -91,6 +91,12 @@ Better Auth provides these endpoints automatically at `/api/auth/*`:
   }
   ```
 - Returns: `{ user: User }`
+
+**POST** `/api/admin/forgot-password`
+- Request password reset for admin accounts
+- **No authentication required** (can be called before login)
+- Body: `{ email: "admin@example.com" }`
+- Returns: `{ success: true, message: "If an account exists, a reset link has been sent." }`
 
 **POST** `/api/auth/admin/list-users`
 - List all users
@@ -295,6 +301,157 @@ Reset password after OTP verification.
 
 ---
 
+#### 6. KYC Preview (Before Registration)
+
+**POST** `/api/citizen/kyc-preview`
+
+Preview citizen's KYC data from Fayda before completing registration. This allows citizens to verify their information before creating an account.
+
+**Request:**
+```json
+{
+  "fin": "123456789012",
+  "otp": "123456"
+}
+```
+
+**Response (Success):**
+```json
+{
+  "success": true,
+  "data": {
+    "full_name": "John Doe",
+    "date_of_birth": "1990-01-15",
+    "gender": "male",
+    "photo_url": "https://...",
+    "address": "Addis Ababa, Ethiopia"
+  }
+}
+```
+
+*Note: This endpoint does NOT delete the OTP, so it can be called multiple times before finalizing registration.*
+
+**Status Codes:**
+- `200` - Preview successful
+- `400` - Invalid FIN or OTP
+- `500` - Server error
+
+---
+
+#### 7. Get Citizen Profile
+
+**GET** `/api/citizen/profile`
+
+Get the authenticated citizen's profile information. Requires a valid session token.
+
+**Headers:**
+```
+Authorization: Bearer YOUR_TOKEN
+```
+
+**Response (Success):**
+```json
+{
+  "success": true,
+  "profile": {
+    "id": "user-uuid",
+    "username": "123456789012",
+    "email": "citizen@example.com",
+    "name": "John Doe",
+    "role": "citizen",
+    "status": "active",
+    "fin": "123456789012",
+    "phone_number": "+251912345678",
+    "region": "Addis Ababa",
+    "sub_city": "Bole",
+    "kebele": "05",
+    "work_type": "Technology / IT",
+    "occupation": "Software Engineer",
+    "dob": "1990-01-15",
+    "gender": "male",
+    "image": "https://...",
+    "created_at": "2026-01-15T10:00:00Z",
+    "last_login_at": "2026-03-26T08:30:00Z"
+  }
+}
+```
+
+**Error Response (403 - Inactive Account):**
+```json
+{
+  "success": false,
+  "error": "Account is not active"
+}
+```
+
+**Status Codes:**
+- `200` - Profile retrieved
+- `401` - Unauthorized (missing/invalid token)
+- `403` - Account inactive or deleted
+- `404` - User not found
+- `500` - Server error
+
+---
+
+#### 8. Update Citizen Profile
+
+**PUT** `/api/citizen/profile`
+
+Update the authenticated citizen's contact and location details.
+
+**Headers:**
+```
+Authorization: Bearer YOUR_TOKEN
+Content-Type: application/json
+```
+
+**Request Body:**
+```json
+{
+  "phone_number": "+251987654321",
+  "region": "Addis Ababa",
+  "sub_city": "Kirkos",
+  "kebele": "12",
+  "work_type": "Government Employee",
+  "occupation": "Civil Servant"
+}
+```
+
+**Parameters (all optional):**
+| Field | Type | Description |
+|-------|------|-------------|
+| `phone_number` | string | New phone number |
+| `region` | string | Region/state |
+| `sub_city` | string | Sub-city or district |
+| `kebele` | string | Kebele/ward |
+| `work_type` | string | Work type from dropdown |
+| `occupation` | string | Specific occupation/job title |
+
+**Response (Success):**
+```json
+{
+  "success": true,
+  "profile": {
+    "id": "user-uuid",
+    "phone_number": "+251987654321",
+    "region": "Addis Ababa",
+    "sub_city": "Kirkos",
+    "kebele": "12",
+    "work_type": "Government Employee",
+    "occupation": "Civil Servant",
+    "updated_at": "2026-03-26T09:00:00Z"
+  }
+}
+```
+
+**Status Codes:**
+- `200` - Profile updated
+- `401` - Unauthorized
+- `403` - Account inactive
+- `500` - Server error
+
+---
+
 ## Frontend Integration Examples
 
 ### React with Better Auth Client
@@ -410,8 +567,9 @@ const loginCitizen = async (loginInput: string, password: string) => {
    - Secure HTTP-only cookies
 
 4. **CSRF Protection**
-   - Enabled by default
-   - Origin validation
+   - Disabled in development for API testing
+   - Enable in production by setting `NODE_ENV=production`
+   - Origin validation available when enabled
 
 5. **Rate Limiting**
    - 100 requests per minute per IP
@@ -420,6 +578,15 @@ const loginCitizen = async (loginInput: string, password: string) => {
 6. **Email Verification**
    - Required for new accounts
    - 1-hour verification token expiration
+
+7. **Account Status Checks**
+   - All protected endpoints verify account is active
+   - Deleted accounts are blocked from access
+   - Middleware checks `status` and `deleted_at` fields
+
+8. **XSS Prevention**
+   - Forum posts and replies automatically strip HTML tags
+   - Prevents script injection attacks
 
 ---
 
@@ -483,12 +650,20 @@ curl -X POST http://localhost:4000/api/auth/admin/create-user \
 ### Citizen Registration
 
 ```bash
-# 1. Initiate registration
+# 1. Initiate registration (sends OTP via Fayda)
 curl -X POST http://localhost:4000/api/citizen/initiate-register \
   -H "Content-Type: application/json" \
   -d '{"fin": "123456789012"}'
 
-# 2. Complete registration (after receiving OTP)
+# 2. Preview KYC data (optional - verify info before registering)
+curl -X POST http://localhost:4000/api/citizen/kyc-preview \
+  -H "Content-Type: application/json" \
+  -d '{
+    "fin": "123456789012",
+    "otp": "123456"
+  }'
+
+# 3. Complete registration (after receiving OTP)
 curl -X POST http://localhost:4000/api/citizen/complete-register \
   -H "Content-Type: application/json" \
   -d '{
@@ -496,6 +671,24 @@ curl -X POST http://localhost:4000/api/citizen/complete-register \
     "otp": "123456",
     "email": "citizen@example.com",
     "password": "SecurePass123!"
+  }'
+```
+
+### Get/Update Citizen Profile
+
+```bash
+# Get profile (requires login token)
+curl -X GET http://localhost:4000/api/citizen/profile \
+  -H "Authorization: Bearer YOUR_TOKEN"
+
+# Update profile
+curl -X PUT http://localhost:4000/api/citizen/profile \
+  -H "Authorization: Bearer YOUR_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "phone_number": "+251987654321",
+    "region": "Addis Ababa",
+    "sub_city": "Bole"
   }'
 ```
 

@@ -56,6 +56,8 @@ Forums are categorized discussion boards where citizens can:
 - Reply to existing threads
 - Report abusive content
 
+**Security Note:** All post and reply content is automatically sanitized to prevent XSS (Cross-Site Scripting) attacks. HTML tags are stripped from content before storage. For example, `<script>alert('hack')</script>` becomes `alert('hack')`.
+
 ### Forum Categories
 
 | Category | Icon | Description |
