@@ -1,13 +1,7 @@
 import { Hono } from 'hono';
-import { Pool } from 'pg';
-import { config } from '../config/env.js';
 import { auth } from '../auth/index.js';
-import { globalSuperAdminAuth, 
-   adminAuth ,superAdminAuth, type AuthContext } from '../middleware/auth.js';
-
-const pool = new Pool({
-  connectionString: config.databaseUrl,
-});
+import { pool } from '../db/pool.js';
+import { globalSuperAdminAuth, adminAuth, superAdminAuth, type AuthContext } from '../middleware/auth.js';
 
 const agencyManagement = new Hono<{ Variables: AuthContext }>();
 

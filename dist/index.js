@@ -6,6 +6,12 @@ import { auth } from './auth/index.js';
 import citizenAuthRoutes from './routes/citizen-auth.js';
 import adminRoutes from './routes/admin.js';
 import citizenManagementRoutes from './routes/citizen-management.js';
+import civicRoutes from './routes/civic.js';
+import civicAdminRoutes from './routes/civic-admin.js';
+import workTypesRoutes from './routes/work-types.js';
+import transportRoutes from './routes/transport.js';
+import transportAdminRoutes from './routes/transport-admin.js';
+import agencyManagementRoutes from './routes/agency-management.js';
 const app = new Hono();
 // CORS Configuration
 app.use('/*', cors({
@@ -25,6 +31,16 @@ app.route('/api/citizen', citizenAuthRoutes);
 app.route('/api/admin', adminRoutes);
 // Mount Citizen Management routes
 app.route('/api/admin', citizenManagementRoutes);
+// Mount Civic Engagement routes (public)
+app.route('/api', civicRoutes);
+// Mount Civic Engagement Admin routes
+app.route('/api/admin', civicAdminRoutes);
+// Mount Work Types routes
+app.route('/api', workTypesRoutes);
+app.route('/api/transport', transportRoutes);
+app.route('/api/admin/transport', transportAdminRoutes);
+// Mount Agency Staff Management routes
+app.route('/api/admin/agency', agencyManagementRoutes);
 // Health Check
 app.get('/', (c) => {
     return c.json({

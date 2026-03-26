@@ -1,21 +1,30 @@
 import { betterAuth } from "better-auth";
 import { admin, username } from "better-auth/plugins";
 import { Pool } from "pg";
+import { Kysely, PostgresDialect, CamelCasePlugin } from "kysely";
 import bcrypt from "bcrypt";
 import { config } from "../config/env.js";
 /**
- * Production-grade Better Auth configuration
- * Following industry best practices for security and scalability
- */
+
+    Production-grade Better Auth configuration
+
+    Following industry best practices for security and scalability
+    */
 export const auth = betterAuth({
     // Database configuration using Supabase PostgreSQL
-    database: new Pool({
-        connectionString: config.databaseUrl,
-        // Connection pool settings for production
-        max: 20, // Maximum number of clients in the pool
-        idleTimeoutMillis: 30000, // Close idle clients after 30 seconds
-        connectionTimeoutMillis: 2000, // Return error after 2 seconds if connection not established
-    }),
+    database: {
+        db: new Kysely({
+            dialect: new PostgresDialect({
+                pool: new Pool({
+                    connectionString: config.databaseUrl,
+                    max: 20,
+                    idleTimeoutMillis: 30000,
+                    connectionTimeoutMillis: 2000,
+                }),
+            }),
+            plugins: [new CamelCasePlugin()],
+        }),
+    },
     // Base configuration
     baseURL: config.betterAuthUrl,
     secret: config.betterAuthSecret,
@@ -153,7 +162,6 @@ export const auth = betterAuth({
             defaultRole: "citizen",
         }),
     ],
-    // Hooks for audit logging
     databaseHooks: {
         user: {
             create: {
@@ -170,7 +178,9 @@ export const auth = betterAuth({
         session: {
             create: {
                 after: async (session) => {
-                    console.log(`[AUDIT] Session created for user: ${session.user_id}`);
+                    // Try camelCase first, fallback to snake_case
+                    const user_id = session.user_id ?? session.user_id ?? "unknown";
+                    console.log(`[AUDIT] Session created for user: ${user_id}`);
                 },
             },
         },

@@ -1,9 +1,5 @@
 import { createMiddleware } from 'hono/factory';
-import { Pool } from 'pg';
-import { config } from '../config/env.js';
-const pool = new Pool({
-    connectionString: config.databaseUrl,
-});
+import { pool } from '../db/pool.js';
 /**
  * Admin Authorization Middleware
  * Verifies JWT token and checks if user is admin or super_admin
@@ -36,7 +32,7 @@ export const adminAuth = () => createMiddleware(async (c, next) => {
             }, 401);
         }
         // Get user details
-        const userResult = await pool.query('SELECT id, email, name, role, status FROM "user" WHERE id = $1', [session.user_id]);
+        const userResult = await pool.query('SELECT id, email, name, role, status, bureau_id FROM "user" WHERE id = $1', [session.user_id]);
         if (userResult.rows.length === 0) {
             return c.json({
                 success: false,
@@ -64,6 +60,7 @@ export const adminAuth = () => createMiddleware(async (c, next) => {
         c.set('user', user);
         c.set('user_id', user.id);
         c.set('userRole', user.role);
+        c.set('bureauId', user.bureau_id);
         await next();
     }
     catch (error) {
@@ -73,6 +70,45 @@ export const adminAuth = () => createMiddleware(async (c, next) => {
             error: 'Authentication failed'
         }, 500);
     }
+});
+export const agencyAuth = (bureauName) => createMiddleware(async (c, next) => {
+    const user = c.get('user');
+    const userRole = c.get('userRole');
+    const bureauId = c.get('bureauId');
+    // A. If Global Super Admin (No bureau assigned), they can see everything
+    if (userRole === 'super_admin' && !bureauId) {
+        return await next();
+    }
+    // B. If they have a bureau, check if it matches the name of the agency
+    if (bureauId) {
+        const res = await pool.query('SELECT name FROM bureaus WHERE id = $1', [bureauId]);
+        const currentBureauName = res.rows[0]?.name;
+        if (currentBureauName === bureauName) {
+            return await next();
+        }
+    }
+    return c.json({
+        success: false,
+        error: `Forbidden: This dashboard is only for ${bureauName} staff.`
+    }, 403);
+});
+/**
+ * Global Super Admin Authorization
+ * Only for the system-wide admin who manages bureaus and civic engagement.
+ */
+export const globalSuperAdminAuth = () => createMiddleware(async (c, next) => {
+    const userRole = c.get('userRole');
+    const bureauId = c.get('bureauId');
+    // We check if bureauId is "falsy" (null, undefined, or empty)
+    const isGlobal = !bureauId;
+    if (userRole !== 'super_admin' || !isGlobal) {
+        return c.json({
+            success: false,
+            error: "Unauthorized: Global Super Admin only",
+            debug: { role: userRole, bureauId: bureauId } // This helps you see what's wrong if it fails
+        }, 403);
+    }
+    await next();
 });
 /**
  * Super Admin Authorization Middleware

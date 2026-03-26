@@ -1,12 +1,7 @@
 import { Hono } from "hono";
-import { Pool } from "pg";
 import bcrypt from "bcrypt";
-import { config } from "../config/env.js";
+import { pool } from "../db/pool.js";
 import { adminAuth, type AuthContext } from "../middleware/auth.js";
-
-const pool = new Pool({
-  connectionString: config.databaseUrl,
-});
 
 /**
  * Admin Management Routes
@@ -19,7 +14,7 @@ const adminRoutes = new Hono<{ Variables: AuthContext }>();
  * Admin forgot password via email
  * This redirects to Better Auth's built-in forgot password endpoint
  */
-adminRoutes.post("/forgot-password", adminAuth(), async (c) => {
+adminRoutes.post("/forgot-password", async (c) => {
   try {
     const { email } = await c.req.json();
 

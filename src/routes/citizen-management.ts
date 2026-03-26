@@ -1,12 +1,7 @@
 import { Hono } from "hono";
-import { Pool } from "pg";
 import bcrypt from "bcrypt";
-import { config } from "../config/env.js";
+import { pool } from "../db/pool.js";
 import { adminAuth, superAdminAuth, type AuthContext } from "../middleware/auth.js";
-
-const pool = new Pool({
-  connectionString: config.databaseUrl,
-});
 
 /**
  * Citizen Management Routes

@@ -1,17 +1,13 @@
 import { Hono } from "hono";
 import { auth } from "../auth/index.js";
 import { FaydaService } from "../services/fyda.js";
-import { Pool } from "pg";
-import { config } from "../config/env.js";
-
-const pool = new Pool({
-  connectionString: config.databaseUrl,
-});
+import { pool } from "../db/pool.js";
+import { citizenAuth as citizenAuthMiddleware, type CitizenAuthContext } from "../middleware/citizen-auth.js";
 
 /**
  * Citizen Authentication Routes
  * Integrates Fayda identity verification with Better Auth
- * 
+ *
  * Flow:
  * 1. initiate-register: Send FIN, receive OTP via Fayda
  * 2. complete-register: Verify OTP with Fayda, create user in Better Auth
@@ -19,14 +15,14 @@ const pool = new Pool({
  * 4. initiate-reset: Request password reset (sends Fayda OTP)
  * 5. reset-password: Verify OTP and reset password
  */
-const citizenAuth = new Hono();
+const citizenAuthRoutes = new Hono();
 
 /**
  * POST /citizen/initiate-register
  * Start citizen registration process
  * Sends OTP via Fayda identity system
  */
-citizenAuth.post("/initiate-register", async (c) => {
+citizenAuthRoutes.post("/initiate-register", async (c) => {
   try {
     const { fin } = await c.req.json();
 
@@ -70,7 +66,7 @@ citizenAuth.post("/initiate-register", async (c) => {
 });
 
 
-citizenAuth.post("/kyc-preview", async (c) => {
+citizenAuthRoutes.post("/kyc-preview", async (c) => {
   try {
     const { fin, otp } = await c.req.json();
     // Verify with Fayda
@@ -90,7 +86,7 @@ citizenAuth.post("/kyc-preview", async (c) => {
  * 
  * NEW: Email is optional, FIN is used as username
  */
-citizenAuth.post("/complete-register", async (c) => {
+citizenAuthRoutes.post("/complete-register", async (c) => {
   try {
     const { fin, otp, password, email } = await c.req.json();
 
@@ -168,7 +164,7 @@ citizenAuth.post("/complete-register", async (c) => {
  * 
  * UPDATED: Uses username (FIN) for authentication
  */
-citizenAuth.post("/login", async (c) => {
+citizenAuthRoutes.post("/login", async (c) => {
   try {
     const { loginInput, password } = await c.req.json();
     const rawInput = (loginInput || "").trim();
@@ -308,7 +304,7 @@ citizenAuth.post("/login", async (c) => {
  * POST /citizen/initiate-reset
  * Request password reset via Fayda OTP
  */
-citizenAuth.post("/initiate-reset", async (c) => {
+citizenAuthRoutes.post("/initiate-reset", async (c) => {
   try {
     const { fin } = await c.req.json();
 
@@ -354,7 +350,7 @@ citizenAuth.post("/initiate-reset", async (c) => {
  * POST /citizen/reset-password
  * Reset password after Fayda OTP verification
  */
-citizenAuth.post("/reset-password", async (c) => {
+citizenAuthRoutes.post("/reset-password", async (c) => {
   try {
     const { fin, otp, newPassword } = await c.req.json();
 
@@ -404,17 +400,26 @@ citizenAuth.post("/reset-password", async (c) => {
 });
 
 
-citizenAuth.get("/profile", async (c) => {
+/**
+ * GET /citizen/profile
+ * Get citizen profile (uses shared auth middleware with status check)
+ */
+citizenAuthRoutes.get("/profile", citizenAuthMiddleware(), async (c) => {
   try {
-    const token = c.req.header('Authorization')?.replace('Bearer ', '');
-    if (!token) return c.json({ success: false, error: 'Unauthorized' }, 401);
+    const user_id = c.get('user_id');
 
-    const session = await pool.query('SELECT "user_id", "expires_at" FROM "session" WHERE token = $1', [token]);
-    if (session.rows.length === 0 || new Date(session.rows[0].expires_at) < new Date()) {
-      return c.json({ success: false, error: 'Session expired' }, 401);
+    const user = await pool.query(
+      `SELECT id, username, email, name, role, status, fin, phone_number,
+              region, sub_city, kebele, work_type, occupation, dob, gender, image,
+              created_at, last_login_at
+       FROM "user" WHERE id = $1`,
+      [user_id]
+    );
+
+    if (user.rows.length === 0) {
+      return c.json({ success: false, error: 'User not found' }, 404);
     }
 
-    const user = await pool.query('SELECT * FROM "user" WHERE id = $1', [session.rows[0].user_id]);
     return c.json({ success: true, profile: user.rows[0] });
   } catch (error: any) {
     return c.json({ success: false, error: error.message }, 500);
@@ -423,23 +428,17 @@ citizenAuth.get("/profile", async (c) => {
 
 /**
  * PUT /citizen/profile
- * Update citizen contact details
+ * Update citizen contact details (uses shared auth middleware with status check)
  */
-citizenAuth.put("/profile", async (c) => {
+citizenAuthRoutes.put("/profile", citizenAuthMiddleware(), async (c) => {
   try {
-    const token = c.req.header('Authorization')?.replace('Bearer ', '');
-    if (!token) return c.json({ success: false, error: 'Unauthorized' }, 401);
-
-    const session = await pool.query('SELECT "user_id", "expires_at" FROM "session" WHERE token = $1', [token]);
-    if (session.rows.length === 0) return c.json({ success: false, error: 'Unauthorized' }, 401);
-
-    const user_id = session.rows[0].user_id;
+    const user_id = c.get('user_id');
     const { phone_number, region, sub_city, kebele, work_type, occupation } = await c.req.json();
 
-  const updates: string[] = [];
-const values: any[] =[];
+    const updates: string[] = [];
+    const values: any[] = [];
     const payload: any = { phone_number, region, sub_city, kebele, work_type, occupation };
-    
+
     Object.keys(payload).forEach((key) => {
       if (payload[key] !== undefined) {
         values.push(payload[key]);
@@ -451,7 +450,7 @@ const values: any[] =[];
 
     values.push(user_id);
     const result = await pool.query(
-      `UPDATE "user" SET ${updates.join(', ')} WHERE id = $${values.length} RETURNING *`,
+      `UPDATE "user" SET ${updates.join(', ')}, updated_at = NOW() WHERE id = $${values.length} RETURNING *`,
       values
     );
 
@@ -461,4 +460,4 @@ const values: any[] =[];
   }
 });
 
-export default citizenAuth;
+export default citizenAuthRoutes;

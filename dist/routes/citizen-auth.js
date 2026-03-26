@@ -1,11 +1,8 @@
 import { Hono } from "hono";
 import { auth } from "../auth/index.js";
 import { FaydaService } from "../services/fyda.js";
-import { Pool } from "pg";
-import { config } from "../config/env.js";
-const pool = new Pool({
-    connectionString: config.databaseUrl,
-});
+import { pool } from "../db/pool.js";
+import { citizenAuth as citizenAuthMiddleware } from "../middleware/citizen-auth.js";
 /**
  * Citizen Authentication Routes
  * Integrates Fayda identity verification with Better Auth
@@ -17,13 +14,13 @@ const pool = new Pool({
  * 4. initiate-reset: Request password reset (sends Fayda OTP)
  * 5. reset-password: Verify OTP and reset password
  */
-const citizenAuth = new Hono();
+const citizenAuthRoutes = new Hono();
 /**
  * POST /citizen/initiate-register
  * Start citizen registration process
  * Sends OTP via Fayda identity system
  */
-citizenAuth.post("/initiate-register", async (c) => {
+citizenAuthRoutes.post("/initiate-register", async (c) => {
     try {
         const { fin } = await c.req.json();
         // Validate FIN format (12 digits)
@@ -57,6 +54,18 @@ citizenAuth.post("/initiate-register", async (c) => {
         }, 500);
     }
 });
+citizenAuthRoutes.post("/kyc-preview", async (c) => {
+    try {
+        const { fin, otp } = await c.req.json();
+        // Verify with Fayda
+        const kycData = await FaydaService.verifyOtp(fin, otp);
+        // Return the data to the frontend to show the "Preview" screen
+        return c.json({ success: true, data: kycData });
+    }
+    catch (error) {
+        return c.json({ success: false, error: error.message }, 500);
+    }
+});
 /**
  * POST /citizen/complete-register
  * Complete registration after Fayda OTP verification
@@ -64,76 +73,66 @@ citizenAuth.post("/initiate-register", async (c) => {
  *
  * NEW: Email is optional, FIN is used as username
  */
-citizenAuth.post("/complete-register", async (c) => {
+citizenAuthRoutes.post("/complete-register", async (c) => {
     try {
-        const { fin, otp, phone, password, email } = await c.req.json();
-        // Validate required inputs
-        if (!fin || !otp || !phone || !password) {
-            return c.json({
-                success: false,
-                error: "FIN, OTP, phone, and password are required"
-            }, 400);
+        const { fin, otp, password, email } = await c.req.json();
+        if (!fin || !otp || !password) {
+            return c.json({ success: false, error: "Missing required fields" }, 400);
         }
-        // Verify OTP with Fayda
+        // 1. Verify OTP with Fayda API
         const kycData = await FaydaService.verifyOtp(fin, otp);
-        // Check if FIN already exists (using username field)
+        const verifiedPhone = kycData.personalIdentity.phone;
+        // 2. Check if user exists in Better Auth
         const existingUser = await pool.query('SELECT id FROM "user" WHERE username = $1', [fin]);
         if (existingUser.rows.length > 0) {
-            return c.json({
-                success: false,
-                error: "User already registered"
-            }, 409);
+            return c.json({ success: false, error: "User already registered" }, 409);
         }
-        // Create user via Better Auth API
-        // Use username plugin - FIN becomes username, email is optional
-        const signUpBody = {
-            email: email || `${fin}@civic.local`, // Use fake email if not provided
-            password,
-            name: kycData.personalIdentity.fullName,
-        };
+        // 3. Create Better Auth User
         const userResult = await auth.api.signUpEmail({
-            body: signUpBody,
+            body: { email: email || `${fin}@civic.local`, password, name: kycData.personalIdentity.fullName },
         });
-        if (!userResult || !userResult.user) {
+        if (!userResult || !userResult.user)
             throw new Error("Failed to create user");
-        }
-        // Update user with Fayda data and username
+        // 4. Update Postgres with Hierarchical Data (Mapping Fayda -> Postgres)
         await pool.query(`UPDATE "user" SET 
         username = $1,
         fin = $2,
-        phone_number = $3,
-        dob = $4,
-        gender = $5,
-        photo_url = $6,
-        role = 'citizen',
-        email_verified = $7
-      WHERE id = $8`, [
+        fan = $3,
+        phone_number = $4,
+        dob = $5,
+        dob_eth = $6,
+        gender = $7,
+        image = $8,        -- Changed from photo_url to image
+        region = $9,
+        sub_city = $10,
+        kebele = $11,
+        "email_verified" = $12,
+        status = 'active', -- Using standard status
+        "updated_at" = NOW()
+      WHERE id = $13`, [
             fin,
             fin,
-            phone,
+            kycData.personalIdentity.fan,
+            kycData.personalIdentity.phone,
             kycData.personalIdentity.dob,
+            kycData.personalIdentity.dobEth,
             kycData.personalIdentity.gender,
-            kycData.biometrics?.face || null,
+            kycData.biometrics?.face || null, // Mapping to 'image'
+            kycData.address.region,
+            kycData.address.woreda,
+            kycData.address.kebele,
             email ? true : false,
             userResult.user.id,
         ]);
         return c.json({
             success: true,
             message: "Registration successful",
-            user: {
-                id: userResult.user.id,
-                email: userResult.user.email,
-                name: userResult.user.name,
-                role: "citizen",
-            },
+            user: { id: userResult.user.id, name: userResult.user.name }
         });
     }
     catch (error) {
         console.error("[Citizen Auth] Complete register error:", error);
-        return c.json({
-            success: false,
-            error: error.message || "Registration failed"
-        }, 500);
+        return c.json({ success: false, error: error.message }, 500);
     }
 });
 /**
@@ -143,7 +142,7 @@ citizenAuth.post("/complete-register", async (c) => {
  *
  * UPDATED: Uses username (FIN) for authentication
  */
-citizenAuth.post("/login", async (c) => {
+citizenAuthRoutes.post("/login", async (c) => {
     try {
         const { loginInput, password } = await c.req.json();
         const rawInput = (loginInput || "").trim();
@@ -248,7 +247,7 @@ citizenAuth.post("/login", async (c) => {
  * POST /citizen/initiate-reset
  * Request password reset via Fayda OTP
  */
-citizenAuth.post("/initiate-reset", async (c) => {
+citizenAuthRoutes.post("/initiate-reset", async (c) => {
     try {
         const { fin } = await c.req.json();
         if (!fin) {
@@ -285,7 +284,7 @@ citizenAuth.post("/initiate-reset", async (c) => {
  * POST /citizen/reset-password
  * Reset password after Fayda OTP verification
  */
-citizenAuth.post("/reset-password", async (c) => {
+citizenAuthRoutes.post("/reset-password", async (c) => {
     try {
         const { fin, otp, newPassword } = await c.req.json();
         if (!fin || !otp || !newPassword) {
@@ -324,4 +323,51 @@ citizenAuth.post("/reset-password", async (c) => {
         }, 500);
     }
 });
-export default citizenAuth;
+/**
+ * GET /citizen/profile
+ * Get citizen profile (uses shared auth middleware with status check)
+ */
+citizenAuthRoutes.get("/profile", citizenAuthMiddleware(), async (c) => {
+    try {
+        const user_id = c.get('user_id');
+        const user = await pool.query(`SELECT id, username, email, name, role, status, fin, phone_number,
+              region, sub_city, kebele, work_type, occupation, dob, gender, image,
+              created_at, last_login_at
+       FROM "user" WHERE id = $1`, [user_id]);
+        if (user.rows.length === 0) {
+            return c.json({ success: false, error: 'User not found' }, 404);
+        }
+        return c.json({ success: true, profile: user.rows[0] });
+    }
+    catch (error) {
+        return c.json({ success: false, error: error.message }, 500);
+    }
+});
+/**
+ * PUT /citizen/profile
+ * Update citizen contact details (uses shared auth middleware with status check)
+ */
+citizenAuthRoutes.put("/profile", citizenAuthMiddleware(), async (c) => {
+    try {
+        const user_id = c.get('user_id');
+        const { phone_number, region, sub_city, kebele, work_type, occupation } = await c.req.json();
+        const updates = [];
+        const values = [];
+        const payload = { phone_number, region, sub_city, kebele, work_type, occupation };
+        Object.keys(payload).forEach((key) => {
+            if (payload[key] !== undefined) {
+                values.push(payload[key]);
+                updates.push(`${key} = $${values.length}`);
+            }
+        });
+        if (updates.length === 0)
+            return c.json({ success: true });
+        values.push(user_id);
+        const result = await pool.query(`UPDATE "user" SET ${updates.join(', ')}, updated_at = NOW() WHERE id = $${values.length} RETURNING *`, values);
+        return c.json({ success: true, profile: result.rows[0] });
+    }
+    catch (error) {
+        return c.json({ success: false, error: error.message }, 500);
+    }
+});
+export default citizenAuthRoutes;

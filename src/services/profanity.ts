@@ -1,9 +1,14 @@
-import { Pool } from 'pg';
-import { config } from '../config/env.js';
+import { pool } from '../db/pool.js';
 
-const pool = new Pool({
-  connectionString: config.databaseUrl,
-});
+/**
+ * Strip all HTML tags from text to prevent XSS attacks
+ * @param text - The text to sanitize
+ * @returns The text with all HTML tags removed
+ */
+export function stripHtmlTags(text: string): string {
+  if (!text) return text;
+  return text.replace(/<[^>]*>/g, '').trim();
+}
 
 export interface ProfanityCheckResult {
   isClean: boolean;

@@ -1,11 +1,6 @@
 import { Hono } from 'hono';
-import { Pool } from 'pg';
-import { config } from '../config/env.js';
+import { pool } from '../db/pool.js';
 import { adminAuth } from '../middleware/auth.js';
-
-const pool = new Pool({
-  connectionString: config.databaseUrl,
-});
 
 const workTypes = new Hono();
 

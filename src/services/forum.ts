@@ -1,10 +1,5 @@
-import { Pool } from 'pg';
-import { config } from '../config/env.js';
-import { checkProfanity } from './profanity.js';
-
-const pool = new Pool({
-  connectionString: config.databaseUrl,
-});
+import { pool } from '../db/pool.js';
+import { checkProfanity, stripHtmlTags } from './profanity.js';
 
 export interface Forum {
   id: string;
@@ -168,63 +163,71 @@ export async function getPostById(id: string) {
 }
 
 export async function createPost(forumId: string, user_id: string, title: string, content: string) {
-  const profanityCheck = await checkProfanity(title + ' ' + content);
-  
+  // Strip HTML tags to prevent XSS
+  const sanitizedTitle = stripHtmlTags(title);
+  const sanitizedContent = stripHtmlTags(content);
+
+  const profanityCheck = await checkProfanity(sanitizedTitle + ' ' + sanitizedContent);
+
   if (!profanityCheck.isClean) {
-    throw { 
-      code: 'PROFANITY_DETECTED', 
+    throw {
+      code: 'PROFANITY_DETECTED',
       message: 'Content contains inappropriate language',
       matchedWords: profanityCheck.matchedWords,
       severity: profanityCheck.severity
     };
   }
-  
+
   const result = await pool.query(
     `INSERT INTO posts (forum_id, user_id, title, content) VALUES ($1, $2, $3, $4) RETURNING *`,
-    [forumId, user_id, title, content]
+    [forumId, user_id, sanitizedTitle, sanitizedContent]
   );
   return result.rows[0];
 }
 
 export async function updatePost(id: string, user_id: string, data: { title?: string; content?: string }, isAdmin: boolean) {
   const post = await pool.query('SELECT * FROM posts WHERE id = $1', [id]);
-  
+
   if (post.rows.length === 0) return null;
-  
+
   if (!isAdmin && post.rows[0].user_id !== user_id) {
     throw { code: 'UNAUTHORIZED', message: 'You can only edit your own posts' };
   }
-  
-  if (data.title || data.content) {
-    const newTitle = data.title || post.rows[0].title;
-    const newContent = data.content || post.rows[0].content;
-    
+
+  // Sanitize input
+  const sanitizedTitle = data.title ? stripHtmlTags(data.title) : undefined;
+  const sanitizedContent = data.content ? stripHtmlTags(data.content) : undefined;
+
+  if (sanitizedTitle || sanitizedContent) {
+    const newTitle = sanitizedTitle || post.rows[0].title;
+    const newContent = sanitizedContent || post.rows[0].content;
+
     const profanityCheck = await checkProfanity(newTitle + ' ' + newContent);
-    
+
     if (!profanityCheck.isClean) {
-      throw { 
-        code: 'PROFANITY_DETECTED', 
+      throw {
+        code: 'PROFANITY_DETECTED',
         message: 'Content contains inappropriate language',
         matchedWords: profanityCheck.matchedWords
       };
     }
   }
-  
+
   const updates: string[] = [];
   const values: any[] = [];
   let paramCount = 1;
-  
-  if (data.title) {
+
+  if (sanitizedTitle) {
     updates.push(`title = $${paramCount++}`);
-    values.push(data.title);
+    values.push(sanitizedTitle);
   }
-  if (data.content) {
+  if (sanitizedContent) {
     updates.push(`content = $${paramCount++}`);
-    values.push(data.content);
+    values.push(sanitizedContent);
   }
-  
+
   if (updates.length === 0) return post.rows[0];
-  
+
   values.push(id);
   const result = await pool.query(
     `UPDATE posts SET ${updates.join(', ')}, updated_at = NOW() WHERE id = $${paramCount} RETURNING *`,
@@ -272,34 +275,37 @@ export async function getReplies(postId: string, page = 1, limit = 50) {
 
 export async function createReply(postId: string, user_id: string, content: string) {
   const post = await pool.query('SELECT * FROM posts WHERE id = $1', [postId]);
-  
+
   if (post.rows.length === 0) throw { code: 'NOT_FOUND', message: 'Post not found' };
   if (post.rows[0].is_locked) throw { code: 'LOCKED', message: 'Post is locked' };
-  
-  const profanityCheck = await checkProfanity(content);
-  
+
+  // Strip HTML tags to prevent XSS
+  const sanitizedContent = stripHtmlTags(content);
+
+  const profanityCheck = await checkProfanity(sanitizedContent);
+
   if (!profanityCheck.isClean) {
-    throw { 
-      code: 'PROFANITY_DETECTED', 
+    throw {
+      code: 'PROFANITY_DETECTED',
       message: 'Content contains inappropriate language',
       matchedWords: profanityCheck.matchedWords
     };
   }
-  
+
   const client = await pool.connect();
   try {
     await client.query('BEGIN');
-    
+
     const result = await client.query(
       `INSERT INTO replies (post_id, user_id, content) VALUES ($1, $2, $3) RETURNING *`,
-      [postId, user_id, content]
+      [postId, user_id, sanitizedContent]
     );
-    
+
     await client.query(
       'UPDATE posts SET reply_count = reply_count + 1 WHERE id = $1',
       [postId]
     );
-    
+
     await client.query('COMMIT');
     return result.rows[0];
   } catch (e) {

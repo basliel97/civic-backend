@@ -1,9 +1,4 @@
-import { Pool } from 'pg';
-import { config } from '../config/env.js';
-
-const pool = new Pool({
-  connectionString: config.databaseUrl,
-});
+import { pool } from '../db/pool.js';
 
 export async function getBureaus() {
   const result = await pool.query(

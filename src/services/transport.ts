@@ -1,9 +1,4 @@
-import { Pool } from 'pg';
-import { config } from '../config/env.js';
-
-const pool = new Pool({
-  connectionString: config.databaseUrl,
-});
+import { pool } from '../db/pool.js';
 
 export interface TransportApplication {
   userId: string;
@@ -176,7 +171,8 @@ export async function reviewApplication(
   try {
     await client.query('BEGIN');
 
-    const appResult = await client.query('SELECT * FROM transport_applications WHERE id = $1', [applicationId]);
+    // Use FOR UPDATE to lock the row and prevent race conditions
+    const appResult = await client.query('SELECT * FROM transport_applications WHERE id = $1 FOR UPDATE', [applicationId]);
     if (appResult.rows.length === 0) throw new Error('Application not found');
     const app = appResult.rows[0];
 
@@ -332,19 +328,28 @@ export async function cancelApplication(applicationId: string, adminId: string, 
   try {
     await client.query('BEGIN');
 
-    // Soft delete: Change status to 'cancelled'
+    // Get current application status for audit log
+    const appResult = await client.query(
+      'SELECT application_status FROM transport_applications WHERE id = $1',
+      [applicationId]
+    );
+
+    if (appResult.rows.length === 0) throw new Error('Application not found');
+    const oldStatus = appResult.rows[0].application_status;
+
+    // Soft delete: Change application_status to 'cancelled'
     const updated = await client.query(
-      `UPDATE transport_applications 
-       SET status = 'cancelled', admin_notes = $1, updated_at = NOW() 
+      `UPDATE transport_applications
+       SET application_status = 'cancelled', admin_notes = $1, updated_at = NOW()
        WHERE id = $2 RETURNING *`,
       [reason, applicationId]
     );
 
     // Log the cancellation
     await client.query(
-      `INSERT INTO application_audit_logs (application_id, changed_by, old_status, new_status, action_notes) 
-       VALUES ($1, $2, 'active_flow', 'cancelled', $3)`,
-      [applicationId, adminId, reason]
+      `INSERT INTO application_audit_logs (application_id, changed_by, old_status, new_status, action_notes)
+       VALUES ($1, $2, $3, 'cancelled', $4)`,
+      [applicationId, adminId, oldStatus, reason]
     );
 
     await client.query('COMMIT');

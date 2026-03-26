@@ -1,72 +1,11 @@
 import { Hono } from 'hono';
-import { Pool } from 'pg';
-import { config } from '../config/env.js';
+import { citizenAuth, type CitizenAuthContext } from '../middleware/citizen-auth.js';
 import { getForums, getForumById, getPostsInForum, getPostById, createPost, updatePost, deletePost, getReplies, createReply, deleteReply, togglePinPost, toggleLockPost } from '../services/forum.js';
 import { getPolls, getPollById, votePoll, getPollResults } from '../services/poll.js';
 import { createReport } from '../services/report.js';
 import { getBureaus, createSuggestion, getMySuggestions } from '../services/suggestion.js';
-import { createMiddleware } from 'hono/factory';
 
-const pool = new Pool({
-  connectionString: config.databaseUrl,
-});
-
-const civic = new Hono();
-
-type CivicVariables = {
-  user_id: string;
-  userRole: string;
-  userRegion?: string;
-  userWorkType?: string;
-  userGender?: string;
-};
-
-const citizenAuth = createMiddleware<{ Variables: CivicVariables }>(async (c, next) => {
-  const authHeader = c.req.header('Authorization');
-  
-  if (!authHeader) {
-    return c.json({ success: false, error: 'Authorization required' }, 401);
-  }
-  
-  const token = authHeader.replace('Bearer ', '');
-  
-  try {
-    const sessionResult = await pool.query(
-      'SELECT "user_id", "expires_at" FROM "session" WHERE token = $1',
-      [token]
-    );
-    
-    if (sessionResult.rows.length === 0 || new Date(sessionResult.rows[0].expires_at) < new Date()) {
-      return c.json({ success: false, error: 'Invalid or expired token' }, 401);
-    }
-    
-    const userResult = await pool.query(
-      'SELECT id, role, region, work_type, gender, status FROM "user" WHERE id = $1',
-      [sessionResult.rows[0].user_id]
-    );
-    
-    if (userResult.rows.length === 0) {
-      return c.json({ success: false, error: 'User not found' }, 404);
-    }
-    
-    const user = userResult.rows[0];
-    
-    if (user.status !== 'active') {
-      return c.json({ success: false, error: 'Account is not active' }, 403);
-    }
-    
-    c.set('user_id', user.id);
-    c.set('userRole', user.role);
-    c.set('userRegion', user.region);
-    c.set('userWorkType', user.work_type);
-    c.set('userGender', user.gender);
-    
-    await next();
-  } catch (error) {
-    console.error('[Citizen Auth] Error:', error);
-    return c.json({ success: false, error: 'Authentication failed' }, 500);
-  }
-});
+const civic = new Hono<{ Variables: CitizenAuthContext }>();
 
 civic.get('/forums', async (c) => {
   try {
@@ -109,7 +48,7 @@ civic.get('/forums/:id/posts', async (c) => {
   }
 });
 
-civic.post('/forums/:id/posts', citizenAuth, async (c) => {
+civic.post('/forums/:id/posts', citizenAuth(), async (c) => {
   try {
     const { id } = c.req.param();
     const user_id = c.get('user_id');
@@ -154,7 +93,7 @@ civic.get('/posts/:id', async (c) => {
   }
 });
 
-civic.put('/posts/:id', citizenAuth, async (c) => {
+civic.put('/posts/:id', citizenAuth(), async (c) => {
   try {
     const { id } = c.req.param();
     const user_id = c.get('user_id');
@@ -180,7 +119,7 @@ civic.put('/posts/:id', citizenAuth, async (c) => {
   }
 });
 
-civic.delete('/posts/:id', citizenAuth, async (c) => {
+civic.delete('/posts/:id', citizenAuth(), async (c) => {
   try {
     const { id } = c.req.param();
     const user_id = c.get('user_id');
@@ -202,7 +141,7 @@ civic.delete('/posts/:id', citizenAuth, async (c) => {
   }
 });
 
-civic.post('/posts/:id/replies', citizenAuth, async (c) => {
+civic.post('/posts/:id/replies', citizenAuth(), async (c) => {
   try {
     const { id } = c.req.param();
     const user_id = c.get('user_id');
@@ -226,7 +165,7 @@ civic.post('/posts/:id/replies', citizenAuth, async (c) => {
   }
 });
 
-civic.delete('/replies/:id', citizenAuth, async (c) => {
+civic.delete('/replies/:id', citizenAuth(), async (c) => {
   try {
     const { id } = c.req.param();
     const user_id = c.get('user_id');
@@ -258,7 +197,7 @@ civic.get('/polls', async (c) => {
   }
 });
 
-civic.get('/polls/:id', citizenAuth, async (c) => {
+civic.get('/polls/:id', citizenAuth(), async (c) => {
   try {
     const { id } = c.req.param();
     const user_id = c.get('user_id');
@@ -276,7 +215,7 @@ civic.get('/polls/:id', citizenAuth, async (c) => {
   }
 });
 
-civic.post('/polls/:id/vote', citizenAuth, async (c) => {
+civic.post('/polls/:id/vote', citizenAuth(), async (c) => {
   try {
     const { id } = c.req.param();
     const user_id = c.get('user_id');
@@ -306,7 +245,7 @@ civic.post('/polls/:id/vote', citizenAuth, async (c) => {
   }
 });
 
-civic.get('/polls/:id/results', citizenAuth, async (c) => {
+civic.get('/polls/:id/results', citizenAuth(), async (c) => {
   try {
     const { id } = c.req.param();
     const user_id = c.get('user_id');
@@ -322,7 +261,7 @@ civic.get('/polls/:id/results', citizenAuth, async (c) => {
   }
 });
 
-civic.post('/reports', citizenAuth, async (c) => {
+civic.post('/reports', citizenAuth(), async (c) => {
   try {
     const user_id = c.get('user_id');
     const { item_id, item_type, item_title, reason, description } = await c.req.json();
@@ -349,7 +288,7 @@ civic.get('/bureaus', async (c) => {
   }
 });
 
-civic.post('/suggestions', citizenAuth, async (c) => {
+civic.post('/suggestions', citizenAuth(), async (c) => {
   try {
     const user_id = c.get('user_id');
     const { bureau_id, subject, content } = await c.req.json();
@@ -366,7 +305,7 @@ civic.post('/suggestions', citizenAuth, async (c) => {
   }
 });
 
-civic.get('/suggestions/my', citizenAuth, async (c) => {
+civic.get('/suggestions/my', citizenAuth(), async (c) => {
   try {
     const user_id = c.get('user_id');
     const query = c.req.query();

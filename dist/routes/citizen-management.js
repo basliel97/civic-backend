@@ -1,11 +1,7 @@
 import { Hono } from "hono";
-import { Pool } from "pg";
 import bcrypt from "bcrypt";
-import { config } from "../config/env.js";
+import { pool } from "../db/pool.js";
 import { adminAuth, superAdminAuth } from "../middleware/auth.js";
-const pool = new Pool({
-    connectionString: config.databaseUrl,
-});
 /**
  * Citizen Management Routes
  * Complete CRUD operations with audit tracking
@@ -37,7 +33,7 @@ const buildSearchQuery = (search) => {
 citizenManagement.post("/citizens", adminAuth(), async (c) => {
     try {
         const adminId = c.get('user_id');
-        const { fin, name, phone, password, email, dob, gender, photo_url } = await c.req.json();
+        const { fin, name, phone, password, email, dob, gender, image } = await c.req.json();
         // Validate required fields
         if (!fin || !name || !phone || !password) {
             return c.json({
@@ -83,7 +79,7 @@ citizenManagement.post("/citizens", adminAuth(), async (c) => {
         // Create user with all information
         const userResult = await pool.query(`INSERT INTO "user" (
         id, username, email, email_verified, name, role,
-        phone_number, fin, dob, gender, photo_url,
+        phone_number, fin, dob, gender, image,
         status, created_by, created_at, updated_at
       ) VALUES (
         gen_random_uuid(), $1, $2, $3, $4, 'citizen',
@@ -98,7 +94,7 @@ citizenManagement.post("/citizens", adminAuth(), async (c) => {
             fin, // fin
             dob || null, // dob (optional)
             gender || null, // gender (optional)
-            photo_url || null, // photo_url (optional)
+            image || null, // image (optional)
             adminId // created_by
         ]);
         const user_id = userResult.rows[0].id;
@@ -110,7 +106,7 @@ citizenManagement.post("/citizens", adminAuth(), async (c) => {
       )`, [user_id, user_id, hashedPassword]);
         // Get full citizen data
         const citizenData = await pool.query(`SELECT id, username, name, email, phone_number, status,
-        created_at, fin, dob, gender, photo_url
+        created_at, fin, dob, gender, image
       FROM "user" WHERE id = $1`, [user_id]);
         return c.json({
             success: true,
@@ -173,7 +169,7 @@ citizenManagement.get("/citizens", adminAuth(), async (c) => {
       SELECT 
         id, username, name, email, phone_number, status,
         created_at, updated_at, last_login_at,
-        fin, dob, gender, photo_url
+        fin, dob, gender, image
       FROM "user"
       ${whereClause}
       ORDER BY ${orderColumn} ${orderDirection}
@@ -214,7 +210,7 @@ citizenManagement.get("/citizens/:id", adminAuth(), async (c) => {
         const result = await pool.query(`SELECT 
         id, username, name, email, phone_number, status,
         created_at, updated_at, deleted_at, last_login_at,
-        fin, dob, gender, photo_url,
+        fin, dob, gender, image,
         created_by, updated_by, deleted_by, deletion_reason,
         failed_login_attempts, locked_until
       FROM "user"
@@ -258,7 +254,7 @@ citizenManagement.put("/citizens/:id", adminAuth(), async (c) => {
         const adminId = c.get('user_id');
         const updates = await c.req.json();
         // Allowed fields to update
-        const allowedFields = ['name', 'email', 'phone_number', 'dob', 'gender', 'photo_url'];
+        const allowedFields = ['name', 'email', 'phone_number', 'dob', 'gender', 'image'];
         const updateFields = [];
         const values = [];
         for (const field of allowedFields) {

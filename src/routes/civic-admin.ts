@@ -1,16 +1,11 @@
 import { Hono } from 'hono';
-import { Pool } from 'pg';
-import { config } from '../config/env.js';
+import { pool } from '../db/pool.js';
 import { adminAuth, superAdminAuth, type AuthContext } from '../middleware/auth.js';
 import { getBannedWords, addBannedWord, deleteBannedWord, bulkAddBannedWords } from '../services/profanity.js';
 import { getForums, createForum, updateForum, deleteForum, togglePinPost, toggleLockPost } from '../services/forum.js';
 import { getPolls, getPollById, createPoll, updatePoll, deletePoll, getPollResults, getAllPollsForAdmin } from '../services/poll.js';
 import { getReports, getReportById, resolveReport, rejectReport } from '../services/report.js';
 import { getBureaus, createBureau, updateBureau, deleteBureau, getSuggestions, getSuggestionById, respondToSuggestion } from '../services/suggestion.js';
-
-const pool = new Pool({
-  connectionString: config.databaseUrl,
-});
 
 const civicAdmin = new Hono<{ Variables: AuthContext }>();
 

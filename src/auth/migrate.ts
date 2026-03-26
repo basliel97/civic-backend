@@ -1,13 +1,8 @@
 /**
  * Migration utilities to migrate users from Supabase Auth to Better Auth
  */
-import { Pool } from "pg";
 import { supabaseAdmin } from "../services/supabase.js";
-import { config } from "../config/env.js";
-
-const pool = new Pool({
-  connectionString: config.databaseUrl,
-});
+import { pool } from "../db/pool.js";
 
 /**
  * Get all existing users from Supabase profiles table

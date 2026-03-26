@@ -1,10 +1,5 @@
 import { createMiddleware } from 'hono/factory';
-import { Pool } from 'pg';
-import { config } from '../config/env.js';
-
-const pool = new Pool({
-  connectionString: config.databaseUrl,
-});
+import { pool } from '../db/pool.js';
 
 // Type definitions for Hono context
 export type AuthContext = {
