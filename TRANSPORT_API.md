@@ -1,13 +1,13 @@
 # Transport Agency API Documentation
 
-**Version:** 2.1.0 (G-Cloud Multi-Tenant Architecture)
+**Version:** 3.0.0 (Fully Dynamic Multi-Tenant Architecture)
 **Base URL:** `http://localhost:4000/api`
 
 ---
 
 ## 📋 Table of Contents
 
-- [Service Types (Slugs)](#service-types-slugs)
+- [Architecture Overview](#architecture-overview)
 - [Citizen Endpoints (Mobile App)](#citizen-endpoints-mobile-app)
 - [Agency Admin Endpoints (Web Dashboard)](#agency-admin-endpoints-web-dashboard)
 - [Chat System](#chat-system)
@@ -15,27 +15,71 @@
 
 ---
 
-## Service Types (Slugs)
+## Architecture Overview
 
-When applying, the `serviceType` must be one of these strings:
+### Dynamic Service Model
 
-| Slug | Service Name |
-|------|--------------|
-| `renewal` | Driver's license renewal |
-| `verification_international` | International verification |
-| `replacement` | Replacement license |
-| `file_transfer` | Record transfer to regions |
-| `specialty_training` | Specialty training info |
-| `taxi_competency` | Taxi driver certificate |
-| `rescheduling` | Theory test rescheduling |
-| `lifting_suspension` | Remove license suspension |
-| `info_request` | Driver info request |
+This API uses a **fully dynamic, multi-tenant architecture**:
+
+- **No hardcoded service types** - Services are stored in the `bureau_services` table
+- **UUID-based service selection** - Applications reference services via `service_id`
+- **Bureau isolation** - Each bureau manages its own services and applications
+- **Bureau ID as scope** - All admin operations are scoped to the bureau
+
+### How It Works
+
+1. **Mobile App Flow:**
+   - Fetch available services for a bureau: `GET /transport/bureaus/:bureauId/services`
+   - Apply using the `service_id` from the response
+
+2. **Admin Dashboard Flow:**
+   - Query applications with filters: `GET /admin/transport/applications?status=paid&serviceId=uuid`
+   - Bureau scope is automatic (based on admin's bureau)
 
 ---
 
 ## 📱 Citizen Endpoints (Mobile App)
 
-**Requires Header:** `Authorization: Bearer <citizen_token>`
+**Requires Header:** `Authorization: Bearer <citizen_token>` (except for public endpoints)
+
+### 0. Get Bureau Services (PUBLIC - No Auth Required)
+
+Fetches the list of available services for a specific bureau. Mobile apps should call this first to dynamically populate service options.
+
+- **Endpoint:** `GET /api/transport/bureaus/:bureauId/services`
+- **Auth:** None (public endpoint)
+
+**Path Parameters:**
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `bureauId` | UUID | The bureau's ID |
+
+**Response (200 OK):**
+```json
+{
+  "success": true,
+  "data": [
+    {
+      "id": "service-uuid-1",
+      "service_name": "License Renewal",
+      "service_description": "Renew your driver's license",
+      "base_fee": 500,
+      "required_docs": ["photo", "medical_report"]
+    },
+    {
+      "id": "service-uuid-2",
+      "service_name": "Replacement License",
+      "service_description": "Replace lost or damaged license",
+      "base_fee": 300,
+      "required_docs": ["police_report", "photo"]
+    }
+  ]
+}
+```
+
+**Note:** Store the `id` from this response - you'll need it when submitting an application.
+
+---
 
 ### 1. Verify External Record
 
@@ -87,7 +131,7 @@ Submits a new transport service application with multiple document support.
 **Request Body:**
 ```json
 {
-  "serviceType": "renewal",
+  "serviceId": "service-uuid-from-bureau-services",
   "deliveryMethod": "pickup",
   "externalReferences": {
     "medical_ref": "MED-2026-001",
@@ -101,7 +145,7 @@ Submits a new transport service application with multiple document support.
 ```
 
 **Parameters:**
-- `serviceType` (required): One of the service type slugs
+- `serviceId` (required): UUID from `GET /bureaus/:bureauId/services`
 - `deliveryMethod` (optional): `"pickup"` or `"postal"` (defaults to `"pickup"`)
 - `externalReferences` (optional): Object containing reference numbers for external records
 - `documents` (optional): Array of document URLs
@@ -114,7 +158,7 @@ Submits a new transport service application with multiple document support.
   "data": {
     "id": "app-uuid-123",
     "user_id": "user-uuid",
-    "service_type": "renewal",
+    "service_id": "service-uuid",
     "delivery_method": "pickup",
     "application_status": "submitted",
     "payment_status": "pending",
@@ -230,7 +274,7 @@ Retrieves the active digital driver's license for the citizen.
 
 ### Dashboard Stats
 
-Retrieves aggregated statistics for the transport agency dashboard.
+Retrieves aggregated statistics for the transport agency dashboard (scoped to bureau).
 
 - **Endpoint:** `GET /api/admin/transport/stats`
 - **Auth:** Admin token (Traffic Management bureau)
@@ -334,12 +378,24 @@ Retrieves all admin staff for the bureau.
 
 ---
 
-### Service-Specific Application Tabs
+### Unified Applications Endpoint (Dynamic)
 
-All endpoints support an optional `status` query parameter to filter applications.
+**Single endpoint replaces the 9 hardcoded service-specific routes.**
 
-| Status Values | Description |
-|---------------|-------------|
+- **Endpoint:** `GET /api/admin/transport/applications`
+- **Auth:** Admin token (Traffic Management bureau)
+
+**Query Parameters (all optional):**
+
+| Parameter | Type | Description |
+|-----------|------|-------------|
+| `status` | string | Filter by application status |
+| `serviceId` | UUID | Filter by specific service |
+
+**Status Values:**
+
+| Status | Description |
+|--------|-------------|
 | `submitted` | Application submitted, awaiting payment |
 | `pending_payment` | Payment pending |
 | `paid` | Paid, awaiting review |
@@ -347,43 +403,15 @@ All endpoints support an optional `status` query parameter to filter application
 | `rejected` | Rejected by admin |
 | `cancelled` | Cancelled by admin or citizen |
 
-#### Get Renewals
+**Examples:**
+```
+GET /api/admin/transport/applications                    # All applications
+GET /api/admin/transport/applications?status=paid        # Only paid applications
+GET /api/admin/transport/applications?serviceId=uuid     # Filter by service
+GET /api/admin/transport/applications?status=paid&serviceId=uuid  # Combined filter
+```
 
-- **Endpoint:** `GET /api/admin/transport/renewals?status=paid`
-
-#### Get Verifications
-
-- **Endpoint:** `GET /api/admin/transport/verifications?status=paid`
-
-#### Get Replacements
-
-- **Endpoint:** `GET /api/admin/transport/replacements?status=paid`
-
-#### Get Transfers
-
-- **Endpoint:** `GET /api/admin/transport/transfers?status=paid`
-
-#### Get Specialty Training
-
-- **Endpoint:** `GET /api/admin/transport/specialty-training?status=paid`
-
-#### Get Taxi Competency
-
-- **Endpoint:** `GET /api/admin/transport/taxi-competency?status=paid`
-
-#### Get Rescheduling
-
-- **Endpoint:** `GET /api/admin/transport/rescheduling?status=paid`
-
-#### Get Lifting Suspensions
-
-- **Endpoint:** `GET /api/admin/transport/lifting-suspensions?status=paid`
-
-#### Get Info Requests
-
-- **Endpoint:** `GET /api/admin/transport/info-requests?status=paid`
-
-**Response (200 OK) - All Service Tabs:**
+**Response (200 OK):**
 ```json
 {
   "success": true,
@@ -392,7 +420,10 @@ All endpoints support an optional `status` query parameter to filter application
     {
       "id": "app-uuid",
       "user_id": "user-uuid",
-      "service_type": "renewal",
+      "service_id": "service-uuid",
+      "service_name": "License Renewal",
+      "service_description": "Renew your driver's license",
+      "base_fee": 500,
       "application_status": "paid",
       "payment_status": "paid",
       "delivery_status": "pending",
@@ -629,50 +660,93 @@ Creates a new admin user locked to the same bureau as the creator.
 
 ## Testing Guide
 
-### Step 1: Prepare the Test Data
+### Step 1: Prepare Test Data
 
-Ensure you have a record in your `external_agency_records` table for your test FIN:
-- **FIN:** `123456789012`
-- **Medical Ref:** `MED-2026-001`
-- **Police Ref:** `POL-2026-001`
+1. Ensure you have a record in `external_agency_records`:
+   - **FIN:** `123456789012`
+   - **Medical Ref:** `MED-2026-001`
+   - **Police Ref:** `POL-2026-001`
 
-### Step 2: Test the Citizen Flow
+2. Create a test service in `bureau_services`:
+   - **bureau_id:** Your test bureau UUID
+   - **service_name:** "License Renewal"
+   - **base_fee:** 500
+   - **required_docs:** ["photo", "medical_report"]
+   - **is_active:** true
+
+### Step 2: Test the Dynamic Citizen Flow
 
 1. **Login as Citizen:** Call `POST /api/citizen/login` using FIN `123456789012`. Copy the `token`.
-2. **Verify Record:** Call `POST /api/transport/verify-record` with the token and Medical Ref. It should return the record.
-3. **Apply:** Call `POST /api/transport/apply` with `serviceType: "renewal"`. Copy the `id` from response.
-4. **Pay:** Call `POST /api/transport/pay/:id`. Status should change to `paid`.
-5. **Check Applications:** Call `GET /api/transport/my-applications` to see your application.
-6. **Send Comment:** Call `POST /api/transport/:id/comments` with a message.
-7. **Get Comments:** Call `GET /api/transport/:id/comments` to view chat history.
 
-### Step 3: Test the Admin Flow
+2. **Fetch Available Services (NEW):**
+   ```bash
+   curl -X GET http://localhost:4000/api/transport/bureaus/YOUR_BUREAU_UUID/services
+   ```
+   Copy the `id` of the service you want.
 
-1. **Create an Admin:** Go to Supabase Table Editor, find your user, and change:
-   - `role` → `admin`
-   - `bureau_id` → Select "Addis Ababa Traffic Management" bureau ID
-2. **Login as Admin:** Log in with that user's credentials to get an Admin Token.
-3. **Check Dashboard:** Call `GET /api/admin/transport/stats` to see statistics.
-4. **Check Services:** Call `GET /api/admin/transport/services` to view agency services.
-5. **Check Staff:** Call `GET /api/admin/transport/staff` to view bureau staff.
-6. **Check Tabs:** Call `GET /api/admin/transport/renewals` to see submitted applications.
-7. **Filter by Status:** Call `GET /api/admin/transport/renewals?status=paid` to filter.
-8. **Reply to Comment:** Call `POST /api/admin/transport/:id/comments` to respond.
-9. **Approve:** Call `POST /api/admin/transport/review/:id` with `appStatus: "approved"`.
-10. **Verify Automation:** Check `driver_licenses` table in Supabase for the new license.
+3. **Verify Record:** Call `POST /api/transport/verify-record` with the token and Medical Ref.
 
-### Step 4: Test the "Big App" Security
+4. **Apply (Dynamic):** Call `POST /api/transport/apply` with the `serviceId` from step 2:
+   ```json
+   {
+     "serviceId": "service-uuid-from-step-2",
+     "deliveryMethod": "pickup",
+     "documents": ["url1", "url2"]
+   }
+   ```
 
-1. Create a **second Admin** assigned to a **different bureau** (e.g., Ministry of Health).
-2. Try to call any `GET /api/admin/transport/*` endpoint using their token.
-3. **Result:** Should return **403 Forbidden**. This proves multi-tenancy security works!
+5. **Pay:** Call `POST /api/transport/pay/:id`. Status should change to `paid`.
 
-### Step 5: Test the Chat System
+6. **Check Applications:** Call `GET /api/transport/my-applications` to see your application.
 
-1. As a **citizen**, post a comment on an application.
-2. As an **admin**, view the comments and reply.
-3. As a **citizen**, verify the admin's reply appears in the chat history.
-4. Comments are returned oldest-first (like a chat history).
+7. **Send Comment:** Call `POST /api/transport/:id/comments` with a message.
+
+8. **Get Comments:** Call `GET /api/transport/:id/comments` to view chat history.
+
+### Step 3: Test the Dynamic Admin Flow
+
+1. **Setup Admin:** Set user's `role` → `admin` and `bureau_id` → your bureau UUID.
+
+2. **Login as Admin:** Get an Admin Token.
+
+3. **Check Dashboard:** `GET /api/admin/transport/stats` (now scoped to bureau).
+
+4. **Check Services:** `GET /api/admin/transport/services` to view agency services.
+
+5. **Create a Service (NEW):**
+   ```bash
+   curl -X POST http://localhost:4000/api/admin/transport/services \
+     -H "Authorization: Bearer ADMIN_TOKEN" \
+     -H "Content-Type: application/json" \
+     -d '{"name": "New Test Service", "description": "Test", "fee": 300, "docs": ["photo"]}'
+   ```
+
+6. **View Applications (Dynamic):**
+   ```bash
+   # All applications
+   curl -X GET http://localhost:4000/api/admin/transport/applications
+   
+   # Filter by status
+   curl -X GET "http://localhost:4000/api/admin/transport/applications?status=paid"
+   
+   # Filter by service
+   curl -X GET "http://localhost:4000/api/admin/transport/applications?serviceId=SERVICE_UUID"
+   
+   # Combined filters
+   curl -X GET "http://localhost:4000/api/admin/transport/applications?status=paid&serviceId=SERVICE_UUID"
+   ```
+
+7. **Reply to Comment:** `POST /api/admin/transport/:id/comments`.
+
+8. **Approve:** `POST /api/admin/transport/review/:id` with `appStatus: "approved"`.
+
+9. **Verify Automation:** Check `driver_licenses` table for new license.
+
+### Step 4: Test Multi-Tenancy Security
+
+1. Create a **second Admin** assigned to a **different bureau**.
+2. Login as that admin and try to view applications.
+3. **Result:** Should only see applications from their bureau, proving isolation works.
 
 ---
 

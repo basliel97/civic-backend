@@ -2,7 +2,7 @@ import { pool } from '../db/pool.js';
 
 export interface TransportApplication {
   userId: string;
-  serviceType: string;
+  serviceId: string;
   deliveryMethod?: string;
   externalReferences?: Record<string, string>;
   documents?: string[];
@@ -14,7 +14,7 @@ export interface TransportApplication {
 
 export async function verifyExternalRecord(fin: string, recordType: string, referenceNumber: string) {
   const result = await pool.query(
-    `SELECT * FROM external_agency_records 
+    `SELECT * FROM external_agency_records
      WHERE record_type = $1 AND reference_number = $2 AND citizen_fin = $3`,
     [recordType, referenceNumber, fin]
   );
@@ -26,17 +26,27 @@ export async function submitApplication(data: TransportApplication) {
   try {
     await client.query('BEGIN');
 
+    // Verify the service exists and is active
+    const serviceCheck = await client.query(
+      `SELECT id, bureau_id, service_name FROM bureau_services WHERE id = $1 AND is_active = TRUE`,
+      [data.serviceId]
+    );
+
+    if (serviceCheck.rows.length === 0) {
+      throw new Error('Invalid or inactive service');
+    }
+
     const result = await client.query(
-      `INSERT INTO transport_applications 
-        (user_id, service_type, delivery_method, external_references, documents, application_status, payment_status, delivery_status) 
-       VALUES ($1, $2, $3, $4, $5, 'submitted', 'pending', 'pending') 
+      `INSERT INTO transport_applications
+        (user_id, service_id, service_type, delivery_method, external_references, documents, application_status, payment_status, delivery_status)
+       VALUES ($1, $2, 'dynamic', $3, $4, $5, 'submitted', 'pending', 'pending')
        RETURNING *`,
       [
-        data.userId, 
-        data.serviceType, 
-        data.deliveryMethod || 'pickup', 
+        data.userId,
+        data.serviceId,
+        data.deliveryMethod || 'pickup',
         JSON.stringify(data.externalReferences || {}),
-        JSON.stringify(data.documents || []) // Now correctly handles multiple files
+        JSON.stringify(data.documents || [])
       ]
     );
 
@@ -44,7 +54,7 @@ export async function submitApplication(data: TransportApplication) {
 
     // Audit Log
     await client.query(
-      `INSERT INTO application_audit_logs (application_id, new_status, action_notes) 
+      `INSERT INTO application_audit_logs (application_id, new_status, action_notes)
        VALUES ($1, 'submitted', 'Citizen submitted application with documents')`,
       [application.id]
     );
@@ -119,18 +129,41 @@ export async function getLicenseInfo(userId: string) {
 // 2. ADMIN FUNCTIONS (Used by Transport Officers to review applications)
 // ============================================================================
 
-export async function getAdminApplications(status?: string) {
+export interface ApplicationFilters {
+  status?: string;
+  serviceId?: string;
+  bureauId?: string;
+}
+
+export async function getAdminApplications(filters: ApplicationFilters) {
   let query = `
-    SELECT ta.*, u.name as citizen_name, u.username as citizen_fin 
+    SELECT
+      ta.*,
+      u.name as citizen_name,
+      u.username as citizen_fin,
+      bs.service_name,
+      bs.service_description,
+      bs.base_fee
     FROM transport_applications ta
     JOIN "user" u ON ta.user_id = u.id
+    LEFT JOIN bureau_services bs ON ta.service_id = bs.id
     WHERE 1=1
   `;
-  const params: any[] =[];
+  const params: any[] = [];
 
-  if (status) {
-    params.push(status);
-    query += ` AND ta.status = $${params.length}`;
+  if (filters.status) {
+    params.push(filters.status);
+    query += ` AND ta.application_status = $${params.length}`;
+  }
+
+  if (filters.serviceId) {
+    params.push(filters.serviceId);
+    query += ` AND ta.service_id = $${params.length}`;
+  }
+
+  if (filters.bureauId) {
+    params.push(filters.bureauId);
+    query += ` AND bs.bureau_id = $${params.length}`;
   }
 
   query += ` ORDER BY ta.created_at DESC`;
@@ -138,22 +171,14 @@ export async function getAdminApplications(status?: string) {
   return result.rows;
 }
 
-export async function getApplicationsByService(serviceType: string, status?: string) {
-  let query = `
-    SELECT ta.*, u.name as citizen_name, u.username as citizen_fin 
-    FROM transport_applications ta
-    JOIN "user" u ON ta.user_id = u.id
-    WHERE ta.service_type = $1
-  `;
-  const params: any[] = [serviceType];
-
-  if (status) {
-    params.push(status);
-    query += ` AND ta.status = $2`;
-  }
-
-  query += ` ORDER BY ta.created_at DESC`;
-  const result = await pool.query(query, params);
+export async function getPublicBureauServices(bureauId: string) {
+  const result = await pool.query(
+    `SELECT id, service_name, service_description, base_fee, required_docs
+     FROM bureau_services
+     WHERE bureau_id = $1 AND is_active = TRUE
+     ORDER BY service_name ASC`,
+    [bureauId]
+  );
   return result.rows;
 }
 
@@ -276,22 +301,41 @@ export async function getApplicationComments(appId: string) {
   return result.rows;
 }
 
-export async function getTransportStats() {
-  const result = await pool.query(`
-    SELECT 
+export async function getTransportStats(bureauId?: string) {
+  let query = `
+    SELECT
       COUNT(*) as total_apps,
-      COUNT(*) FILTER (WHERE status = 'pending_payment') as awaiting_payment,
-      COUNT(*) FILTER (WHERE status = 'paid') as awaiting_review,
-      COUNT(*) FILTER (WHERE status = 'approved') as total_approved,
-      COUNT(DISTINCT user_id) as unique_citizens
-    FROM transport_applications
-  `);
-  
-  const revenue = await pool.query(`
-    SELECT COUNT(*) * 500 as total_revenue 
-    FROM transport_applications 
-    WHERE status != 'pending_payment'
-  `);
+      COUNT(*) FILTER (WHERE ta.application_status = 'submitted') as awaiting_payment,
+      COUNT(*) FILTER (WHERE ta.payment_status = 'paid' AND ta.application_status != 'approved') as awaiting_review,
+      COUNT(*) FILTER (WHERE ta.application_status = 'approved') as total_approved,
+      COUNT(DISTINCT ta.user_id) as unique_citizens
+    FROM transport_applications ta
+    LEFT JOIN bureau_services bs ON ta.service_id = bs.id
+    WHERE 1=1
+  `;
+  const params: any[] = [];
+
+  if (bureauId) {
+    params.push(bureauId);
+    query += ` AND bs.bureau_id = $${params.length}`;
+  }
+
+  const result = await pool.query(query, params);
+
+  let revenueQuery = `
+    SELECT COUNT(*) * 500 as total_revenue
+    FROM transport_applications ta
+    LEFT JOIN bureau_services bs ON ta.service_id = bs.id
+    WHERE ta.payment_status = 'paid'
+  `;
+  const revenueParams: any[] = [];
+
+  if (bureauId) {
+    revenueParams.push(bureauId);
+    revenueQuery += ` AND bs.bureau_id = $${revenueParams.length}`;
+  }
+
+  const revenue = await pool.query(revenueQuery, revenueParams);
 
   return {
     ...result.rows[0],

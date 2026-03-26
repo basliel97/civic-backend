@@ -7,7 +7,8 @@ import {
   getCitizenApplications,
   getLicenseInfo,
   addApplicationComment,
-  getApplicationComments
+  getApplicationComments,
+  getPublicBureauServices
 } from '../services/transport.js';
 
 const transport = new Hono<{ Variables: CitizenAuthContext }>();
@@ -16,18 +17,29 @@ const transport = new Hono<{ Variables: CitizenAuthContext }>();
  * 🚗 CITIZEN ROUTES
  */
 
+// 0. Get Bureau Services (PUBLIC - No Auth Required)
+transport.get('/bureaus/:bureauId/services', async (c) => {
+  try {
+    const { bureauId } = c.req.param();
+    const services = await getPublicBureauServices(bureauId);
+    return c.json({ success: true, data: services });
+  } catch (error: any) {
+    return c.json({ success: false, error: error.message }, 500);
+  }
+});
+
 // 1. Verify Record
 transport.post('/verify-record', citizenAuth(), async (c) => {
   try {
     const fin = c.get('fin');
     const { recordType, referenceNumber } = await c.req.json();
-    
+
     const record = await verifyExternalRecord(fin, recordType, referenceNumber);
-    
+
     if (!record) {
       return c.json({ success: false, error: 'Record not found or does not match your FIN' }, 404);
     }
-    
+
     return c.json({ success: true, data: record.result_data });
   } catch (error: any) {
     return c.json({ success: false, error: error.message }, 500);
@@ -39,15 +51,15 @@ transport.post('/apply', citizenAuth(), async (c) => {
   try {
     const userId = c.get('user_id');
     const body = await c.req.json();
-    
+
     const application = await submitApplication({
       userId,
-      serviceType: body.serviceType,
+      serviceId: body.serviceId,
       deliveryMethod: body.deliveryMethod,
       externalReferences: body.externalReferences,
-      documents: body.documents // Array of URLs
+      documents: body.documents
     });
-    
+
     return c.json({ success: true, message: 'Application submitted', data: application }, 201);
   } catch (error: any) {
     return c.json({ success: false, error: error.message }, 500);

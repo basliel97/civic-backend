@@ -3,7 +3,7 @@ import { pool } from '../db/pool.js';
 // 1. CITIZEN FUNCTIONS (Used by the Mobile App)
 // ============================================================================
 export async function verifyExternalRecord(fin, recordType, referenceNumber) {
-    const result = await pool.query(`SELECT * FROM external_agency_records 
+    const result = await pool.query(`SELECT * FROM external_agency_records
      WHERE record_type = $1 AND reference_number = $2 AND citizen_fin = $3`, [recordType, referenceNumber, fin]);
     return result.rows[0] || null;
 }
@@ -11,19 +11,24 @@ export async function submitApplication(data) {
     const client = await pool.connect();
     try {
         await client.query('BEGIN');
-        const result = await client.query(`INSERT INTO transport_applications 
-        (user_id, service_type, delivery_method, external_references, documents, application_status, payment_status, delivery_status) 
-       VALUES ($1, $2, $3, $4, $5, 'submitted', 'pending', 'pending') 
+        // Verify the service exists and is active
+        const serviceCheck = await client.query(`SELECT id, bureau_id, service_name FROM bureau_services WHERE id = $1 AND is_active = TRUE`, [data.serviceId]);
+        if (serviceCheck.rows.length === 0) {
+            throw new Error('Invalid or inactive service');
+        }
+        const result = await client.query(`INSERT INTO transport_applications
+        (user_id, service_id, service_type, delivery_method, external_references, documents, application_status, payment_status, delivery_status)
+       VALUES ($1, $2, 'dynamic', $3, $4, $5, 'submitted', 'pending', 'pending')
        RETURNING *`, [
             data.userId,
-            data.serviceType,
+            data.serviceId,
             data.deliveryMethod || 'pickup',
             JSON.stringify(data.externalReferences || {}),
-            JSON.stringify(data.documents || []) // Now correctly handles multiple files
+            JSON.stringify(data.documents || [])
         ]);
         const application = result.rows[0];
         // Audit Log
-        await client.query(`INSERT INTO application_audit_logs (application_id, new_status, action_notes) 
+        await client.query(`INSERT INTO application_audit_logs (application_id, new_status, action_notes)
        VALUES ($1, 'submitted', 'Citizen submitted application with documents')`, [application.id]);
         await client.query('COMMIT');
         return application;
@@ -72,39 +77,42 @@ export async function getLicenseInfo(userId) {
     const result = await pool.query(`SELECT * FROM driver_licenses WHERE user_id = $1 AND status = 'active' LIMIT 1`, [userId]);
     return result.rows[0] || null;
 }
-// ============================================================================
-// 2. ADMIN FUNCTIONS (Used by Transport Officers to review applications)
-// ============================================================================
-export async function getAdminApplications(status) {
+export async function getAdminApplications(filters) {
     let query = `
-    SELECT ta.*, u.name as citizen_name, u.username as citizen_fin 
+    SELECT
+      ta.*,
+      u.name as citizen_name,
+      u.username as citizen_fin,
+      bs.service_name,
+      bs.service_description,
+      bs.base_fee
     FROM transport_applications ta
     JOIN "user" u ON ta.user_id = u.id
+    LEFT JOIN bureau_services bs ON ta.service_id = bs.id
     WHERE 1=1
   `;
     const params = [];
-    if (status) {
-        params.push(status);
-        query += ` AND ta.status = $${params.length}`;
+    if (filters.status) {
+        params.push(filters.status);
+        query += ` AND ta.application_status = $${params.length}`;
+    }
+    if (filters.serviceId) {
+        params.push(filters.serviceId);
+        query += ` AND ta.service_id = $${params.length}`;
+    }
+    if (filters.bureauId) {
+        params.push(filters.bureauId);
+        query += ` AND bs.bureau_id = $${params.length}`;
     }
     query += ` ORDER BY ta.created_at DESC`;
     const result = await pool.query(query, params);
     return result.rows;
 }
-export async function getApplicationsByService(serviceType, status) {
-    let query = `
-    SELECT ta.*, u.name as citizen_name, u.username as citizen_fin 
-    FROM transport_applications ta
-    JOIN "user" u ON ta.user_id = u.id
-    WHERE ta.service_type = $1
-  `;
-    const params = [serviceType];
-    if (status) {
-        params.push(status);
-        query += ` AND ta.status = $2`;
-    }
-    query += ` ORDER BY ta.created_at DESC`;
-    const result = await pool.query(query, params);
+export async function getPublicBureauServices(bureauId) {
+    const result = await pool.query(`SELECT id, service_name, service_description, base_fee, required_docs
+     FROM bureau_services
+     WHERE bureau_id = $1 AND is_active = TRUE
+     ORDER BY service_name ASC`, [bureauId]);
     return result.rows;
 }
 export async function reviewApplication(applicationId, adminId, updates) {
@@ -191,21 +199,36 @@ export async function getApplicationComments(appId) {
     [appId]);
     return result.rows;
 }
-export async function getTransportStats() {
-    const result = await pool.query(`
-    SELECT 
+export async function getTransportStats(bureauId) {
+    let query = `
+    SELECT
       COUNT(*) as total_apps,
-      COUNT(*) FILTER (WHERE status = 'pending_payment') as awaiting_payment,
-      COUNT(*) FILTER (WHERE status = 'paid') as awaiting_review,
-      COUNT(*) FILTER (WHERE status = 'approved') as total_approved,
-      COUNT(DISTINCT user_id) as unique_citizens
-    FROM transport_applications
-  `);
-    const revenue = await pool.query(`
-    SELECT COUNT(*) * 500 as total_revenue 
-    FROM transport_applications 
-    WHERE status != 'pending_payment'
-  `);
+      COUNT(*) FILTER (WHERE ta.application_status = 'submitted') as awaiting_payment,
+      COUNT(*) FILTER (WHERE ta.payment_status = 'paid' AND ta.application_status != 'approved') as awaiting_review,
+      COUNT(*) FILTER (WHERE ta.application_status = 'approved') as total_approved,
+      COUNT(DISTINCT ta.user_id) as unique_citizens
+    FROM transport_applications ta
+    LEFT JOIN bureau_services bs ON ta.service_id = bs.id
+    WHERE 1=1
+  `;
+    const params = [];
+    if (bureauId) {
+        params.push(bureauId);
+        query += ` AND bs.bureau_id = $${params.length}`;
+    }
+    const result = await pool.query(query, params);
+    let revenueQuery = `
+    SELECT COUNT(*) * 500 as total_revenue
+    FROM transport_applications ta
+    LEFT JOIN bureau_services bs ON ta.service_id = bs.id
+    WHERE ta.payment_status = 'paid'
+  `;
+    const revenueParams = [];
+    if (bureauId) {
+        revenueParams.push(bureauId);
+        revenueQuery += ` AND bs.bureau_id = $${revenueParams.length}`;
+    }
+    const revenue = await pool.query(revenueQuery, revenueParams);
     return {
         ...result.rows[0],
         revenue: revenue.rows[0].total_revenue || 0

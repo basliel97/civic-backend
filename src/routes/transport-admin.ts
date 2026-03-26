@@ -1,12 +1,12 @@
 import { Hono } from 'hono';
 import { adminAuth, agencyAuth, type AuthContext } from '../middleware/auth.js';
-import { 
+import {
   getTransportStats,
   getAgencyServices,
   createAgencyService,
   getAgencyStaff,
-  getApplicationsByService, 
-  reviewApplication, 
+  getAdminApplications,
+  reviewApplication,
   cancelApplication,
   addApplicationComment,
   getApplicationComments
@@ -25,7 +25,8 @@ transportAdmin.use('/*', agencyAuth('Addis Ababa Traffic Management'));
  */
 transportAdmin.get('/stats', async (c) => {
   try {
-    const stats = await getTransportStats();
+    const bureauId = c.get('bureauId');
+    const stats = await getTransportStats(bureauId ?? undefined);
     return c.json({ success: true, data: stats });
   } catch (error: any) {
     return c.json({ success: false, error: error.message }, 500);
@@ -67,61 +68,26 @@ transportAdmin.get('/staff', async (c) => {
 });
 
 /**
- * 🏛️ ALL 9 EXPLICIT SERVICE TABS (GET)
+ * 🏛️ UNIFIED APPLICATIONS ENDPOINT (Dynamic Multi-tenant)
+ * Replaces the 9 hardcoded service-specific routes.
+ * Filter by: ?status=paid&serviceId=uuid
  */
+transportAdmin.get('/applications', async (c) => {
+  try {
+    const bureauId = c.get('bureauId');
+    const status = c.req.query('status');
+    const serviceId = c.req.query('serviceId');
 
-transportAdmin.get('/renewals', async (c) => {
-  const status = c.req.query('status');
-  const data = await getApplicationsByService('renewal', status);
-  return c.json({ success: true, count: data.length, data });
-});
+    const data = await getAdminApplications({
+      status,
+      serviceId,
+      bureauId: bureauId ?? undefined
+    });
 
-transportAdmin.get('/verifications', async (c) => {
-  const status = c.req.query('status');
-  const data = await getApplicationsByService('verification_international', status);
-  return c.json({ success: true, count: data.length, data });
-});
-
-transportAdmin.get('/replacements', async (c) => {
-  const status = c.req.query('status');
-  const data = await getApplicationsByService('replacement', status);
-  return c.json({ success: true, count: data.length, data });
-});
-
-transportAdmin.get('/transfers', async (c) => {
-  const status = c.req.query('status');
-  const data = await getApplicationsByService('file_transfer', status);
-  return c.json({ success: true, count: data.length, data });
-});
-
-transportAdmin.get('/specialty-training', async (c) => {
-  const status = c.req.query('status');
-  const data = await getApplicationsByService('specialty_training', status);
-  return c.json({ success: true, count: data.length, data });
-});
-
-transportAdmin.get('/taxi-competency', async (c) => {
-  const status = c.req.query('status');
-  const data = await getApplicationsByService('taxi_competency', status);
-  return c.json({ success: true, count: data.length, data });
-});
-
-transportAdmin.get('/rescheduling', async (c) => {
-  const status = c.req.query('status');
-  const data = await getApplicationsByService('rescheduling', status);
-  return c.json({ success: true, count: data.length, data });
-});
-
-transportAdmin.get('/lifting-suspensions', async (c) => {
-  const status = c.req.query('status');
-  const data = await getApplicationsByService('lifting_suspension', status);
-  return c.json({ success: true, count: data.length, data });
-});
-
-transportAdmin.get('/info-requests', async (c) => {
-  const status = c.req.query('status');
-  const data = await getApplicationsByService('info_request', status);
-  return c.json({ success: true, count: data.length, data });
+    return c.json({ success: true, count: data.length, data });
+  } catch (error: any) {
+    return c.json({ success: false, error: error.message }, 500);
+  }
 });
 
 /**

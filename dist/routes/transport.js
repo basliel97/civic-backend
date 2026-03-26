@@ -1,10 +1,21 @@
 import { Hono } from 'hono';
 import { citizenAuth } from '../middleware/citizen-auth.js';
-import { verifyExternalRecord, submitApplication, processMockPayment, getCitizenApplications, getLicenseInfo, addApplicationComment, getApplicationComments } from '../services/transport.js';
+import { verifyExternalRecord, submitApplication, processMockPayment, getCitizenApplications, getLicenseInfo, addApplicationComment, getApplicationComments, getPublicBureauServices } from '../services/transport.js';
 const transport = new Hono();
 /**
  * 🚗 CITIZEN ROUTES
  */
+// 0. Get Bureau Services (PUBLIC - No Auth Required)
+transport.get('/bureaus/:bureauId/services', async (c) => {
+    try {
+        const { bureauId } = c.req.param();
+        const services = await getPublicBureauServices(bureauId);
+        return c.json({ success: true, data: services });
+    }
+    catch (error) {
+        return c.json({ success: false, error: error.message }, 500);
+    }
+});
 // 1. Verify Record
 transport.post('/verify-record', citizenAuth(), async (c) => {
     try {
@@ -27,10 +38,10 @@ transport.post('/apply', citizenAuth(), async (c) => {
         const body = await c.req.json();
         const application = await submitApplication({
             userId,
-            serviceType: body.serviceType,
+            serviceId: body.serviceId,
             deliveryMethod: body.deliveryMethod,
             externalReferences: body.externalReferences,
-            documents: body.documents // Array of URLs
+            documents: body.documents
         });
         return c.json({ success: true, message: 'Application submitted', data: application }, 201);
     }
