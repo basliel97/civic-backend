@@ -1,12 +1,13 @@
 import { Hono } from 'hono';
-import { adminAuth, agencyAuth } from '../middleware/auth.js';
-import { getTransportStats, getAgencyServices, createAgencyService, getAgencyStaff, getAdminApplications, reviewApplication, cancelApplication, addApplicationComment, getApplicationComments } from '../services/transport.js';
+import { adminAuth, agencyAdminAuth } from '../middleware/auth.js';
+import { getTransportStats, getAgencyServices, createAgencyService, getAgencyStaff, getAdminApplications, getApplicationsByService, reviewApplication, cancelApplication, addApplicationComment, getApplicationComments } from '../services/transport.js';
 const transportAdmin = new Hono();
 /**
- * 🔒 SECURITY: The Bureau Guard
+ * 🔒 SECURITY: Dynamic Agency Guard
+ * Uses agencyAdminAuth() - allows Global Super Admins or any Agency Staff
  */
 transportAdmin.use('/*', adminAuth());
-transportAdmin.use('/*', agencyAuth('Addis Ababa Traffic Management'));
+transportAdmin.use('/*', agencyAdminAuth());
 /**
  * 📊 DASHBOARD STATS
  */
@@ -56,7 +57,6 @@ transportAdmin.get('/staff', async (c) => {
 });
 /**
  * 🏛️ UNIFIED APPLICATIONS ENDPOINT (Dynamic Multi-tenant)
- * Replaces the 9 hardcoded service-specific routes.
  * Filter by: ?status=paid&serviceId=uuid
  */
 transportAdmin.get('/applications', async (c) => {
@@ -74,6 +74,64 @@ transportAdmin.get('/applications', async (c) => {
     catch (error) {
         return c.json({ success: false, error: error.message }, 500);
     }
+});
+/**
+ * 📋 SERVICE-SPECIFIC APPLICATION TABS (Dynamic Multi-tenant)
+ * Each route is now scoped to the admin's bureau.
+ */
+transportAdmin.get('/renewals', async (c) => {
+    const bureauId = c.get('bureauId');
+    const status = c.req.query('status');
+    const data = await getApplicationsByService(bureauId, 'renewal', status);
+    return c.json({ success: true, count: data.length, data });
+});
+transportAdmin.get('/verifications', async (c) => {
+    const bureauId = c.get('bureauId');
+    const status = c.req.query('status');
+    const data = await getApplicationsByService(bureauId, 'verification_international', status);
+    return c.json({ success: true, count: data.length, data });
+});
+transportAdmin.get('/replacements', async (c) => {
+    const bureauId = c.get('bureauId');
+    const status = c.req.query('status');
+    const data = await getApplicationsByService(bureauId, 'replacement', status);
+    return c.json({ success: true, count: data.length, data });
+});
+transportAdmin.get('/transfers', async (c) => {
+    const bureauId = c.get('bureauId');
+    const status = c.req.query('status');
+    const data = await getApplicationsByService(bureauId, 'file_transfer', status);
+    return c.json({ success: true, count: data.length, data });
+});
+transportAdmin.get('/specialty-training', async (c) => {
+    const bureauId = c.get('bureauId');
+    const status = c.req.query('status');
+    const data = await getApplicationsByService(bureauId, 'specialty_training', status);
+    return c.json({ success: true, count: data.length, data });
+});
+transportAdmin.get('/taxi-competency', async (c) => {
+    const bureauId = c.get('bureauId');
+    const status = c.req.query('status');
+    const data = await getApplicationsByService(bureauId, 'taxi_competency', status);
+    return c.json({ success: true, count: data.length, data });
+});
+transportAdmin.get('/rescheduling', async (c) => {
+    const bureauId = c.get('bureauId');
+    const status = c.req.query('status');
+    const data = await getApplicationsByService(bureauId, 'rescheduling', status);
+    return c.json({ success: true, count: data.length, data });
+});
+transportAdmin.get('/lifting-suspensions', async (c) => {
+    const bureauId = c.get('bureauId');
+    const status = c.req.query('status');
+    const data = await getApplicationsByService(bureauId, 'lifting_suspension', status);
+    return c.json({ success: true, count: data.length, data });
+});
+transportAdmin.get('/info-requests', async (c) => {
+    const bureauId = c.get('bureauId');
+    const status = c.req.query('status');
+    const data = await getApplicationsByService(bureauId, 'info_request', status);
+    return c.json({ success: true, count: data.length, data });
 });
 /**
  * 📝 APPLICATION CRUD & REVIEW

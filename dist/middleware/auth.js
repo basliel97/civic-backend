@@ -71,25 +71,30 @@ export const adminAuth = () => createMiddleware(async (c, next) => {
         }, 500);
     }
 });
-export const agencyAuth = (bureauName) => createMiddleware(async (c, next) => {
-    const user = c.get('user');
+/**
+ * Dynamic Agency Admin Authorization Middleware
+ *
+ * Allows access if:
+ * 1. User is a Global Super Admin (super_admin with no bureau_id)
+ * 2. User belongs to ANY valid bureau (has bureau_id)
+ *
+ * This replaces the hardcoded agencyAuth(bureauName) middleware.
+ */
+export const agencyAdminAuth = () => createMiddleware(async (c, next) => {
     const userRole = c.get('userRole');
     const bureauId = c.get('bureauId');
-    // A. If Global Super Admin (No bureau assigned), they can see everything
+    // A. Global Super Admin (no bureau assigned) - can access all agencies
     if (userRole === 'super_admin' && !bureauId) {
         return await next();
     }
-    // B. If they have a bureau, check if it matches the name of the agency
+    // B. Any user with a bureau - they belong to some agency
     if (bureauId) {
-        const res = await pool.query('SELECT name FROM bureaus WHERE id = $1', [bureauId]);
-        const currentBureauName = res.rows[0]?.name;
-        if (currentBureauName === bureauName) {
-            return await next();
-        }
+        return await next();
     }
+    // C. Otherwise, deny access
     return c.json({
         success: false,
-        error: `Forbidden: This dashboard is only for ${bureauName} staff.`
+        error: 'Access Denied: You must be an Agency Staff member to view this.'
     }, 403);
 });
 /**

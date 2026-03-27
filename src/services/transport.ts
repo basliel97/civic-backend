@@ -182,6 +182,42 @@ export async function getPublicBureauServices(bureauId: string) {
   return result.rows;
 }
 
+/**
+ * Get applications filtered by service type, with optional bureau scope.
+ * Used by admin dashboards to view applications by service category.
+ * 
+ * @param bureauId - If provided, restricts results to services belonging to this bureau
+ * @param serviceType - The service type to filter by (e.g., 'renewal', 'replacement')
+ * @param status - Optional status filter
+ */
+export async function getApplicationsByService(bureauId: string | null | undefined, serviceType: string, status?: string) {
+  let query = `
+    SELECT
+      ta.*,
+      u.name as citizen_name,
+      u.username as citizen_fin
+    FROM transport_applications ta
+    JOIN "user" u ON ta.user_id = u.id
+    WHERE ta.service_type = $1
+  `;
+  const params: any[] = [serviceType];
+
+  // If bureauId is provided, restrict to that bureau's services
+  if (bureauId) {
+    params.push(bureauId);
+    query += ` AND ta.service_id IN (SELECT id FROM bureau_services WHERE bureau_id = $${params.length})`;
+  }
+
+  if (status) {
+    params.push(status);
+    query += ` AND ta.application_status = $${params.length}`;
+  }
+
+  query += ` ORDER BY ta.created_at DESC`;
+  const result = await pool.query(query, params);
+  return result.rows;
+}
+
 export async function reviewApplication(
   applicationId: string, 
   adminId: string, 
