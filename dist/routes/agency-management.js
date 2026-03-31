@@ -142,7 +142,7 @@ agencyManagement.delete('/staff/:id', superAdminAuth(), async (c) => {
  * GLOBAL SUPER ADMIN: BUREAU ADMIN MANAGEMENT
  * ==========================================
  */
-// 1. GET All Bureaus with their Admins and SuperAdmins
+// 1. GET All Bureaus with their SuperAdmins
 agencyManagement.get('/bureaus/admins', adminAuth(), globalSuperAdminAuth(), async (c) => {
     try {
         // Fetch all active bureaus
@@ -151,26 +151,26 @@ agencyManagement.get('/bureaus/admins', adminAuth(), globalSuperAdminAuth(), asy
        WHERE status = 'active' 
        ORDER BY name ASC`);
         const bureaus = bureausResult.rows;
-        // For each bureau, fetch admins and superadmins
+        // For each bureau, fetch superadmins
         const result = [];
         for (const bureau of bureaus) {
-            const adminsResult = await pool.query(`SELECT id, name, email, role, status, created_at, last_login_at 
+            const superadminsResult = await pool.query(`SELECT id, name, email, role, status, created_at, last_login_at 
          FROM "user" 
-         WHERE bureau_id = $1 AND role IN ('admin', 'super_admin') AND deleted_at IS NULL
-         ORDER BY role, created_at`, [bureau.id]);
+         WHERE bureau_id = $1 AND role = 'super_admin' AND deleted_at IS NULL
+         ORDER BY created_at`, [bureau.id]);
             result.push({
                 bureau: bureau,
-                admins: adminsResult.rows
+                superadmins: superadminsResult.rows
             });
         }
         return c.json({ success: true, data: result });
     }
     catch (error) {
-        console.error('[Global Admin] Get bureaus admins error:', error);
+        console.error('[Global Admin] Get bureaus superadmins error:', error);
         return c.json({ success: false, error: error.message }, 500);
     }
 });
-// 2. GET Admins and SuperAdmin for a specific Bureau
+// 2. GET SuperAdmin for a specific Bureau
 agencyManagement.get('/bureaus/:bureauId/admins', adminAuth(), globalSuperAdminAuth(), async (c) => {
     try {
         const { bureauId } = c.req.param();
@@ -180,21 +180,92 @@ agencyManagement.get('/bureaus/:bureauId/admins', adminAuth(), globalSuperAdminA
             return c.json({ success: false, error: 'Bureau not found' }, 404);
         }
         const bureau = bureauCheck.rows[0];
-        // Fetch admins and superadmins for this bureau
-        const adminsResult = await pool.query(`SELECT id, name, email, role, status, created_at, last_login_at 
+        // Fetch superadmins for this bureau
+        const superadminsResult = await pool.query(`SELECT id, name, email, role, status, created_at, last_login_at 
        FROM "user" 
-       WHERE bureau_id = $1 AND role IN ('admin', 'super_admin') AND deleted_at IS NULL
-       ORDER BY role, created_at`, [bureauId]);
+       WHERE bureau_id = $1 AND role = 'super_admin' AND deleted_at IS NULL
+       ORDER BY created_at`, [bureauId]);
         return c.json({
             success: true,
             data: {
                 bureau: bureau,
-                admins: adminsResult.rows
+                superadmins: superadminsResult.rows
             }
         });
     }
     catch (error) {
-        console.error('[Global Admin] Get bureau admins error:', error);
+        console.error('[Global Admin] Get bureau superadmins error:', error);
+        return c.json({ success: false, error: error.message }, 500);
+    }
+});
+/**
+ * ==========================================
+ * GLOBAL SUPER ADMIN: MANAGE BUREAU SUPERADMINS
+ * ==========================================
+ */
+// 3. UPDATE a Bureau SuperAdmin
+agencyManagement.put('/bureaus/:bureauId/superadmins/:id', adminAuth(), globalSuperAdminAuth(), async (c) => {
+    try {
+        const { bureauId, id } = c.req.param();
+        const { name, status } = await c.req.json();
+        // Validate bureau exists
+        const bureauCheck = await pool.query('SELECT id FROM bureaus WHERE id = $1 AND status = $2', [bureauId, 'active']);
+        if (bureauCheck.rows.length === 0) {
+            return c.json({ success: false, error: 'Bureau not found' }, 404);
+        }
+        // Ensure target user exists, is a super_admin, and belongs to this bureau
+        const userCheck = await pool.query('SELECT id FROM "user" WHERE id = $1 AND bureau_id = $2 AND role = $3 AND deleted_at IS NULL', [id, bureauId, 'super_admin']);
+        if (userCheck.rows.length === 0) {
+            return c.json({ success: false, error: 'Superadmin not found in this bureau' }, 404);
+        }
+        // Update only provided fields
+        const result = await pool.query(`UPDATE "user" 
+       SET name = COALESCE($1, name), 
+           status = COALESCE($2, status), 
+           updated_at = NOW() 
+       WHERE id = $3 AND bureau_id = $4 AND role = 'super_admin' AND deleted_at IS NULL
+       RETURNING id, name, email, role, status, created_at, last_login_at`, [name || null, status || null, id, bureauId]);
+        if (result.rows.length === 0) {
+            return c.json({ success: false, error: 'Failed to update superadmin' }, 500);
+        }
+        return c.json({ success: true, data: result.rows[0] });
+    }
+    catch (error) {
+        console.error('[Global Admin] Update bureau superadmin error:', error);
+        return c.json({ success: false, error: error.message }, 500);
+    }
+});
+// 4. DELETE a Bureau SuperAdmin (soft delete)
+agencyManagement.delete('/bureaus/:bureauId/superadmins/:id', adminAuth(), globalSuperAdminAuth(), async (c) => {
+    try {
+        const { bureauId, id } = c.req.param();
+        const adminId = c.get('user_id');
+        // Validate bureau exists
+        const bureauCheck = await pool.query('SELECT id FROM bureaus WHERE id = $1 AND status = $2', [bureauId, 'active']);
+        if (bureauCheck.rows.length === 0) {
+            return c.json({ success: false, error: 'Bureau not found' }, 404);
+        }
+        // Ensure target user exists, is a super_admin, and belongs to this bureau
+        const userCheck = await pool.query('SELECT id FROM "user" WHERE id = $1 AND bureau_id = $2 AND role = $3 AND deleted_at IS NULL', [id, bureauId, 'super_admin']);
+        if (userCheck.rows.length === 0) {
+            return c.json({ success: false, error: 'Superadmin not found in this bureau' }, 404);
+        }
+        // Prevent self-deletion
+        if (id === adminId) {
+            return c.json({ success: false, error: 'You cannot delete your own account' }, 400);
+        }
+        // Soft delete
+        const result = await pool.query(`UPDATE "user" 
+       SET deleted_at = NOW(), status = 'deleted', deleted_by = $1, updated_at = NOW()
+       WHERE id = $2 AND bureau_id = $3 AND role = 'super_admin' AND deleted_at IS NULL
+       RETURNING id, name, email`, [adminId, id, bureauId]);
+        if (result.rows.length === 0) {
+            return c.json({ success: false, error: 'Superadmin not found' }, 404);
+        }
+        return c.json({ success: true, message: 'Superadmin deleted successfully', data: result.rows[0] });
+    }
+    catch (error) {
+        console.error('[Global Admin] Delete bureau superadmin error:', error);
         return c.json({ success: false, error: error.message }, 500);
     }
 });
