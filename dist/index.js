@@ -9,13 +9,13 @@ import citizenManagementRoutes from './routes/citizen-management.js';
 import civicRoutes from './routes/civic.js';
 import civicAdminRoutes from './routes/civic-admin.js';
 import workTypesRoutes from './routes/work-types.js';
-import transportRoutes from './routes/transport.js';
-import transportAdminRoutes from './routes/transport-admin.js';
+import citizenPortalRoutes from './routes/citizen-portal.js';
+import agencyAdminRoutes from './routes/agency-admin.js';
 import agencyManagementRoutes from './routes/agency-management.js';
 const app = new Hono();
 // CORS Configuration
 app.use('/*', cors({
-    origin: config.trustedOrigins?.split(',') || [config.betterAuthUrl, 'http://localhost:3000'],
+    origin: config.trustedOrigins?.split(',') || [config.betterAuthUrl, 'http://localhost:3000',],
     allowMethods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS', 'PATCH'],
     allowHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
     credentials: true,
@@ -37,8 +37,10 @@ app.route('/api', civicRoutes);
 app.route('/api/admin', civicAdminRoutes);
 // Mount Work Types routes
 app.route('/api', workTypesRoutes);
-app.route('/api/transport', transportRoutes);
-app.route('/api/admin/transport', transportAdminRoutes);
+// Mount Government Agency Portal (Citizen-facing)
+app.route('/api/portal', citizenPortalRoutes);
+// Mount Agency Admin Dashboard
+app.route('/api/admin/agency', agencyAdminRoutes);
 // Mount Agency Staff Management routes
 app.route('/api/admin/agency', agencyManagementRoutes);
 // Health Check
@@ -73,5 +75,6 @@ console.log(`👥 Citizen endpoints: ${config.betterAuthUrl}/api/citizen/*`);
 console.log(`👮 Admin endpoints: ${config.betterAuthUrl}/api/admin/*`);
 serve({
     fetch: app.fetch,
-    port: config.port
+    port: config.port,
+    hostname: '0.0.0.0'
 });

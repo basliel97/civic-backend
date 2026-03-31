@@ -9,16 +9,16 @@ import {
   addApplicationComment,
   getApplicationComments,
   getPublicBureauServices
-} from '../services/transport.js';
+} from '../services/agency.js';
 
-const transport = new Hono<{ Variables: CitizenAuthContext }>();
+const citizenPortal = new Hono<{ Variables: CitizenAuthContext }>();
 
 /**
- * 🚗 CITIZEN ROUTES
+ * 🏛️ GOVERNMENT AGENCY PORTAL - CITIZEN ROUTES
  */
 
 // 0. Get Bureau Services (PUBLIC - No Auth Required)
-transport.get('/bureaus/:bureauId/services', async (c) => {
+citizenPortal.get('/bureaus/:bureauId/services', async (c) => {
   try {
     const { bureauId } = c.req.param();
     const services = await getPublicBureauServices(bureauId);
@@ -28,8 +28,8 @@ transport.get('/bureaus/:bureauId/services', async (c) => {
   }
 });
 
-// 1. Verify Record
-transport.post('/verify-record', citizenAuth(), async (c) => {
+// 1. Verify External Record (Medical/Police)
+citizenPortal.post('/verify-record', citizenAuth(), async (c) => {
   try {
     const fin = c.get('fin');
     const { recordType, referenceNumber } = await c.req.json();
@@ -46,8 +46,8 @@ transport.post('/verify-record', citizenAuth(), async (c) => {
   }
 });
 
-// 2. Submit Application (Handles Multiple Documents)
-transport.post('/apply', citizenAuth(), async (c) => {
+// 2. Submit Application
+citizenPortal.post('/apply', citizenAuth(), async (c) => {
   try {
     const userId = c.get('user_id');
     const body = await c.req.json();
@@ -66,26 +66,26 @@ transport.post('/apply', citizenAuth(), async (c) => {
   }
 });
 
-// 3. Pay for Application
-transport.post('/pay/:id', citizenAuth(), async (c) => {
+// 3. Process Payment
+citizenPortal.post('/pay/:id', citizenAuth(), async (c) => {
   try {
     const { id } = c.req.param();
     const userId = c.get('user_id');
-    
+
     const result = await processMockPayment(id, userId);
-    
+
     return c.json({ success: true, message: 'Payment confirmed', data: result });
   } catch (error: any) {
     return c.json({ success: false, error: error.message }, 400);
   }
 });
 
-// 4. My Applications History
-transport.get('/my-applications', citizenAuth(), async (c) => {
+// 4. My Applications
+citizenPortal.get('/my-applications', citizenAuth(), async (c) => {
   try {
     const userId = c.get('user_id');
     const apps = await getCitizenApplications(userId);
-    
+
     return c.json({ success: true, data: apps });
   } catch (error: any) {
     return c.json({ success: false, error: error.message }, 500);
@@ -93,15 +93,15 @@ transport.get('/my-applications', citizenAuth(), async (c) => {
 });
 
 // 5. My Digital License
-transport.get('/my-license', citizenAuth(), async (c) => {
+citizenPortal.get('/my-license', citizenAuth(), async (c) => {
   try {
     const userId = c.get('user_id');
     const license = await getLicenseInfo(userId);
-    
+
     if (!license) {
       return c.json({ success: false, error: 'No active license found' }, 404);
     }
-    
+
     return c.json({ success: true, data: license });
   } catch (error: any) {
     return c.json({ success: false, error: error.message }, 500);
@@ -109,16 +109,16 @@ transport.get('/my-license', citizenAuth(), async (c) => {
 });
 
 /**
- * 💬 CHAT SYSTEM (CITIZEN SIDE)
+ * 💬 COMMUNICATION SYSTEM
  */
 
 // 6. Post a Comment
-transport.post('/:id/comments', citizenAuth(), async (c) => {
+citizenPortal.post('/:id/comments', citizenAuth(), async (c) => {
   try {
     const { id } = c.req.param();
     const userId = c.get('user_id');
     const { text } = await c.req.json();
-    
+
     if (!text) {
       return c.json({ success: false, error: 'Text is required' }, 400);
     }
@@ -130,16 +130,16 @@ transport.post('/:id/comments', citizenAuth(), async (c) => {
   }
 });
 
-// 7. Get Chat History
-transport.get('/:id/comments', citizenAuth(), async (c) => {
+// 7. Get Comment History
+citizenPortal.get('/:id/comments', citizenAuth(), async (c) => {
   try {
     const { id } = c.req.param();
     const comments = await getApplicationComments(id);
-    
+
     return c.json({ success: true, data: comments });
   } catch (error: any) {
     return c.json({ success: false, error: error.message }, 500);
   }
 });
 
-export default transport;
+export default citizenPortal;

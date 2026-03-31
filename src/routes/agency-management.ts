@@ -170,4 +170,85 @@ agencyManagement.delete('/staff/:id', superAdminAuth(), async (c) => {
   }
 });
 
+/**
+ * ==========================================
+ * GLOBAL SUPER ADMIN: BUREAU ADMIN MANAGEMENT
+ * ==========================================
+ */
+
+// 1. GET All Bureaus with their Admins and SuperAdmins
+agencyManagement.get('/bureaus/admins', adminAuth(), globalSuperAdminAuth(), async (c) => {
+  try {
+    // Fetch all active bureaus
+    const bureausResult = await pool.query(
+      `SELECT id, name, description, contact_email, phone, address, status 
+       FROM bureaus 
+       WHERE status = 'active' 
+       ORDER BY name ASC`
+    );
+
+    const bureaus = bureausResult.rows;
+
+    // For each bureau, fetch admins and superadmins
+    const result = [];
+    for (const bureau of bureaus) {
+      const adminsResult = await pool.query(
+        `SELECT id, name, email, role, status, created_at, last_login_at 
+         FROM "user" 
+         WHERE bureau_id = $1 AND role IN ('admin', 'super_admin') AND deleted_at IS NULL
+         ORDER BY role, created_at`,
+        [bureau.id]
+      );
+
+      result.push({
+        bureau: bureau,
+        admins: adminsResult.rows
+      });
+    }
+
+    return c.json({ success: true, data: result });
+  } catch (error: any) {
+    console.error('[Global Admin] Get bureaus admins error:', error);
+    return c.json({ success: false, error: error.message }, 500);
+  }
+});
+
+// 2. GET Admins and SuperAdmin for a specific Bureau
+agencyManagement.get('/bureaus/:bureauId/admins', adminAuth(), globalSuperAdminAuth(), async (c) => {
+  try {
+    const { bureauId } = c.req.param();
+
+    // Check if bureau exists
+    const bureauCheck = await pool.query(
+      'SELECT id, name FROM bureaus WHERE id = $1 AND status = $2',
+      [bureauId, 'active']
+    );
+    if (bureauCheck.rows.length === 0) {
+      return c.json({ success: false, error: 'Bureau not found' }, 404);
+    }
+
+    const bureau = bureauCheck.rows[0];
+
+    // Fetch admins and superadmins for this bureau
+    const adminsResult = await pool.query(
+      `SELECT id, name, email, role, status, created_at, last_login_at 
+       FROM "user" 
+       WHERE bureau_id = $1 AND role IN ('admin', 'super_admin') AND deleted_at IS NULL
+       ORDER BY role, created_at`,
+      [bureauId]
+    );
+
+    return c.json({ 
+      success: true, 
+      data: {
+        bureau: bureau,
+        admins: adminsResult.rows
+      }
+    });
+  } catch (error: any) {
+    console.error('[Global Admin] Get bureau admins error:', error);
+    return c.json({ success: false, error: error.message }, 500);
+  }
+});
+
 export default agencyManagement;
