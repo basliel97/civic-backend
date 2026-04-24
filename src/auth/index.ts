@@ -165,6 +165,11 @@ input: true,
     required: false,
     input: false,
   },
+  bureauId: {
+    type: "string",
+    required: false,
+    input: true,
+  },
 },
 
 },

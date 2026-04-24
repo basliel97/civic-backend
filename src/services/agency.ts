@@ -426,6 +426,127 @@ export async function getBureauStaff(bureauId: string) {
   return result.rows;
 }
 
+
+export async function getSystemAnnouncements() {
+  const result = await pool.query(
+    'SELECT * FROM announcements ORDER BY created_at DESC LIMIT 5'
+  );
+  return result.rows;
+}
+
+/**
+ * 🔔 USER NOTIFICATIONS (Activity)
+ * Fetches the audit logs for the specific user's applications.
+ * This tells them when an officer has updated their status.
+ */
+export async function getUserActivityLogs(userId: string) {
+  const result = await pool.query(
+    `SELECT 
+        log.id, 
+        log.new_status, 
+        log.action_notes as title, 
+        log.created_at,
+        ta.service_type
+     FROM application_audit_logs log
+     JOIN transport_applications ta ON log.application_id = ta.id
+     WHERE ta.user_id = $1
+     ORDER BY log.created_at DESC 
+     LIMIT 10`,
+    [userId]
+  );
+  return result.rows;
+}
+
+
+/**
+ * CITIZEN ACTION: Update Application Details
+ * Allows changing delivery method or documents while payment is still pending.
+ */
+export async function updateApplicationByCitizen(
+  appId: string, 
+  userId: string, 
+  data: { deliveryMethod?: string, documents?: string[] }
+) {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    // 1. Security Check: Must belong to user and payment MUST be pending
+    const check = await client.query(
+      `SELECT id FROM transport_applications 
+       WHERE id = $1 AND user_id = $2 AND payment_status = 'pending'`,
+      [appId, userId]
+    );
+
+    if (check.rows.length === 0) {
+      throw new Error('Application not found or already paid/processed');
+    }
+
+    // 2. Update the record (Using COALESCE to keep existing data if a field is missing)
+    const result = await client.query(
+      `UPDATE transport_applications 
+       SET delivery_method = COALESCE($1, delivery_method), 
+           documents = COALESCE($2, documents),
+           updated_at = NOW() 
+       WHERE id = $3 RETURNING *`,
+      [data.deliveryMethod, data.documents ? JSON.stringify(data.documents) : null, appId]
+    );
+
+    await client.query('COMMIT');
+    return result.rows[0];
+  } catch (error) {
+    await client.query('ROLLBACK');
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
+/**
+ * CITIZEN ACTION: Withdraw/Cancel Application
+ * Soft deletes the application so it stays in history but stops being active.
+ */
+export async function cancelApplicationByCitizen(appId: string, userId: string) {
+  const client = await pool.connect();
+  try {
+    await client.query('BEGIN');
+
+    // Ownership and payment status check
+    const check = await client.query(
+      `SELECT id FROM transport_applications 
+       WHERE id = $1 AND user_id = $2 AND payment_status = 'pending'`,
+      [appId, userId]
+    );
+
+    if (check.rows.length === 0) {
+      throw new Error('Cannot cancel: Application already paid or processed');
+    }
+
+    // Set application_status to 'cancelled'
+    const result = await client.query(
+      `UPDATE transport_applications 
+       SET application_status = 'cancelled', updated_at = NOW() 
+       WHERE id = $1 RETURNING *`,
+      [appId]
+    );
+
+    // Create an audit log entry for the withdrawal
+    await client.query(
+      `INSERT INTO application_audit_logs (application_id, new_status, action_notes) 
+       VALUES ($1, 'cancelled', 'Citizen withdrew application before payment')`,
+      [appId]
+    );
+
+    await client.query('COMMIT');
+    return result.rows[0];
+  } catch (error) {
+    await client.query('ROLLBACK');
+    throw error;
+  } finally {
+    client.release();
+  }
+}
+
 export async function cancelApplication(applicationId: string, adminId: string, reason: string) {
   const client = await pool.connect();
   try {

@@ -8,7 +8,11 @@ import {
   getLicenseInfo,
   addApplicationComment,
   getApplicationComments,
-  getPublicBureauServices
+  getPublicBureauServices,
+  updateApplicationByCitizen,
+  cancelApplicationByCitizen,
+  getUserActivityLogs,
+  getSystemAnnouncements
 } from '../services/agency.js';
 
 const citizenPortal = new Hono<{ Variables: CitizenAuthContext }>();
@@ -137,6 +141,70 @@ citizenPortal.get('/:id/comments', citizenAuth(), async (c) => {
     const comments = await getApplicationComments(id);
 
     return c.json({ success: true, data: comments });
+  } catch (error: any) {
+    return c.json({ success: false, error: error.message }, 500);
+  }
+});
+
+/**
+ * PUT /api/portal/applications/:id
+ * Citizen updates their own application (Delivery or Documents)
+ */
+citizenPortal.put('/applications/:id', citizenAuth(), async (c) => {
+  try {
+    const { id } = c.req.param();
+    const userId = c.get('user_id');
+    const { deliveryMethod, documents } = await c.req.json();
+
+    const updated = await updateApplicationByCitizen(id, userId, { deliveryMethod, documents });
+
+    return c.json({ 
+      success: true, 
+      message: 'Application details updated', 
+      data: updated 
+    });
+  } catch (error: any) {
+    return c.json({ success: false, error: error.message }, 400);
+  }
+});
+
+/**
+ * 🆕 CANCEL: POST /api/portal/applications/:id/cancel
+ * Citizen withdraws their application
+ * FIXED: Added () to citizenAuth
+ */
+citizenPortal.post('/applications/:id/cancel', citizenAuth(), async (c) => {
+  try {
+    const { id } = c.req.param();
+    const userId = c.get('user_id');
+
+    const result = await cancelApplicationByCitizen(id, userId);
+
+    return c.json({ 
+      success: true, 
+      message: 'Application withdrawn successfully', 
+      data: result 
+    });
+  } catch (error: any) {
+    return c.json({ success: false, error: error.message }, 400);
+  }
+});
+
+citizenPortal.get('/notifications', citizenAuth(), async (c) => {
+  try {
+    const userId = c.get('user_id');
+    const logs = await getUserActivityLogs(userId);
+    return c.json({ success: true, data: logs });
+  } catch (error: any) {
+    return c.json({ success: false, error: error.message }, 500);
+  }
+});
+
+// 9. Get System Announcements (Public News)
+citizenPortal.get('/announcements', async (c) => {
+  try {
+    const news = await getSystemAnnouncements();
+    return c.json({ success: true, data: news });
   } catch (error: any) {
     return c.json({ success: false, error: error.message }, 500);
   }
