@@ -13,21 +13,21 @@ export async function getBureauById(id: string) {
   return result.rows[0];
 }
 
-export async function createBureau(data: { name: string; description?: string; contact_email?: string; phone?: string; address?: string }) {
+export async function createBureau(data: { name: string; description?: string; contact_email?: string; phone?: string; address?: string; icon_url?: string }) {
   const result = await pool.query(
-    `INSERT INTO bureaus (name, description, contact_email, phone, address)
-     VALUES ($1, $2, $3, $4, $5) RETURNING *`,
-    [data.name, data.description || null, data.contact_email || null, data.phone || null, data.address || null]
+    `INSERT INTO bureaus (name, description, contact_email, phone, address, icon_url)
+     VALUES ($1, $2, $3, $4, $5, $6) RETURNING *`,
+    [data.name, data.description || null, data.contact_email || null, data.phone || null, data.address || null, data.icon_url || null]
   );
   return result.rows[0];
 }
 
-export async function updateBureau(id: string, data: Partial<{ name: string; description: string; contact_email: string; phone: string; address: string; status: string }>) {
+export async function updateBureau(id: string, data: Partial<{ name: string; description: string; contact_email: string; phone: string; address: string; status: string; icon_url: string }>) {
   const updates: string[] = [];
   const values: any[] = [];
   let paramCount = 1;
   
-  const fields = ['name', 'description', 'contact_email', 'phone', 'address', 'status'];
+  const fields = ['name', 'description', 'contact_email', 'phone', 'address', 'status', 'icon_url'];
   
   for (const field of fields) {
     if (data[field as keyof typeof data] !== undefined) {

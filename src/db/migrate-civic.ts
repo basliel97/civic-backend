@@ -33,6 +33,7 @@ async function createTables() {
         contact_email VARCHAR(255),
         phone VARCHAR(20),
         address TEXT,
+        icon_url TEXT,
         status VARCHAR(20) DEFAULT 'active',
         created_at TIMESTAMP DEFAULT NOW(),
         updated_at TIMESTAMP DEFAULT NOW()

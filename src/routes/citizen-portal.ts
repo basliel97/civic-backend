@@ -1,5 +1,6 @@
 import { Hono } from 'hono';
 import { citizenAuth, type CitizenAuthContext } from '../middleware/citizen-auth.js';
+import { pool } from '../db/pool.js';
 import {
   verifyExternalRecord,
   submitApplication,
@@ -12,7 +13,8 @@ import {
   updateApplicationByCitizen,
   cancelApplicationByCitizen,
   getUserActivityLogs,
-  getSystemAnnouncements
+  getActiveAnnouncements,
+  deleteApplicationByCitizen
 } from '../services/agency.js';
 
 const citizenPortal = new Hono<{ Variables: CitizenAuthContext }>();
@@ -203,10 +205,33 @@ citizenPortal.get('/notifications', citizenAuth(), async (c) => {
 // 9. Get System Announcements (Public News)
 citizenPortal.get('/announcements', async (c) => {
   try {
-    const news = await getSystemAnnouncements();
+    // For citizens, get bureau-specific announcements if they have a bureau, otherwise global only
+    const userId = c.get('user_id');
+    let bureauId: string | undefined;
+
+    if (userId) {
+      // Get user's bureau if they have one
+      const userResult = await pool.query('SELECT bureau_id FROM "user" WHERE id = $1', [userId]);
+      bureauId = userResult.rows[0]?.bureau_id;
+    }
+
+    const limit = parseInt(c.req.query('limit') || '10');
+
+    const news = await getActiveAnnouncements(bureauId, limit);
     return c.json({ success: true, data: news });
   } catch (error: any) {
     return c.json({ success: false, error: error.message }, 500);
+  }
+});
+
+citizenPortal.delete('/applications/:id', citizenAuth(), async (c) => {
+  try {
+    const { id } = c.req.param();
+    const userId = c.get('user_id');
+    await deleteApplicationByCitizen(id, userId);
+    return c.json({ success: true, message: 'Record removed from history' });
+  } catch (error: any) {
+    return c.json({ success: false, error: error.message }, 400);
   }
 });
 

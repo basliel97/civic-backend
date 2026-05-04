@@ -120,18 +120,20 @@ export async function deleteForum(id: string) {
   return result.rows[0];
 }
 
-export async function getPostsInForum(forumId: string, page = 1, limit = 20) {
+export async function getPostsInForum(forumId: string, page = 1, limit = 50, currentUserId?: string) {
   const offset = (page - 1) * limit;
   
+  // We use subqueries to count likes and check if the current user liked it
   const result = await pool.query(
-    `SELECT p.*, u.name as user_name, f.name as forum_name
+    `SELECT p.*, u.name as user_name, f.name as forum_name,
+       (SELECT COUNT(*) FROM likes WHERE post_id = p.id) as like_count,
+       EXISTS(SELECT 1 FROM likes WHERE post_id = p.id AND user_id = $4) as is_liked
      FROM posts p
      JOIN "user" u ON p.user_id = u.id
      JOIN forums f ON p.forum_id = f.id
      WHERE p.forum_id = $1 AND p.status = 'active'
      ORDER BY p.is_pinned DESC, p.created_at DESC
-     LIMIT $2 OFFSET $3`,
-    [forumId, limit, offset]
+     LIMIT $2 OFFSET $3`,[forumId, limit, offset, currentUserId || '00000000-0000-0000-0000-000000000000']
   );
   
   const countResult = await pool.query(
@@ -148,90 +150,92 @@ export async function getPostsInForum(forumId: string, page = 1, limit = 20) {
   };
 }
 
-export async function getPostById(id: string) {
+
+export async function getUserPosts(userId: string) {
+  const result = await pool.query(
+    `SELECT p.*, f.name as forum_name,
+       (SELECT COUNT(*) FROM likes WHERE post_id = p.id) as like_count,
+       (SELECT COUNT(*) FROM replies WHERE post_id = p.id AND status = 'active') as reply_count
+     FROM posts p
+     JOIN forums f ON p.forum_id = f.id
+     WHERE p.user_id = $1 AND p.status = 'active'
+     ORDER BY p.created_at DESC`,
+    [userId]
+  );
+  return result.rows;
+}
+
+export async function getPostById(id: string, currentUserId?: string) {
+  // 1. Increment view count
   await pool.query('UPDATE posts SET view_count = view_count + 1 WHERE id = $1', [id]);
   
+  // 2. Fetch post WITH the like count and is_liked status
   const result = await pool.query(
-    `SELECT p.*, u.name as user_name, f.name as forum_name
+    `SELECT p.*, u.name as user_name, f.name as forum_name,
+       (SELECT COUNT(*) FROM likes WHERE post_id = p.id) as like_count,
+       EXISTS(SELECT 1 FROM likes WHERE post_id = p.id AND user_id = $2) as is_liked
      FROM posts p
      JOIN "user" u ON p.user_id = u.id
      JOIN forums f ON p.forum_id = f.id
-     WHERE p.id = $1`,
-    [id]
+     WHERE p.id = $1`,[id, currentUserId || '00000000-0000-0000-0000-000000000000']
   );
   return result.rows[0];
 }
 
-export async function createPost(forumId: string, user_id: string, title: string, content: string) {
-  // Strip HTML tags to prevent XSS
-  const sanitizedTitle = stripHtmlTags(title);
-  const sanitizedContent = stripHtmlTags(content);
+// src/services/forum.ts
 
-  const profanityCheck = await checkProfanity(sanitizedTitle + ' ' + sanitizedContent);
-
+export async function createPost(forumId: string, user_id: string, title: string, content: string, imageUrl?: string) {
+  const profanityCheck = await checkProfanity(title + ' ' + content);
+  
   if (!profanityCheck.isClean) {
-    throw {
-      code: 'PROFANITY_DETECTED',
+    throw { 
+      code: 'PROFANITY_DETECTED', 
       message: 'Content contains inappropriate language',
       matchedWords: profanityCheck.matchedWords,
       severity: profanityCheck.severity
     };
   }
-
+  
+  // Ensure image_url is saved
   const result = await pool.query(
-    `INSERT INTO posts (forum_id, user_id, title, content) VALUES ($1, $2, $3, $4) RETURNING *`,
-    [forumId, user_id, sanitizedTitle, sanitizedContent]
+    `INSERT INTO posts (forum_id, user_id, title, content, image_url) 
+     VALUES ($1, $2, $3, $4, $5) RETURNING *`,[forumId, user_id, title, content, imageUrl || null]
   );
+  
   return result.rows[0];
 }
 
-export async function updatePost(id: string, user_id: string, data: { title?: string; content?: string }, isAdmin: boolean) {
-  const post = await pool.query('SELECT * FROM posts WHERE id = $1', [id]);
 
-  if (post.rows.length === 0) return null;
+export async function updatePost(
+  id: string, 
+  user_id: string, 
+  data: { title?: string; content?: string; imageUrl?: string | null }, // 🆕 Added imageUrl
+  isAdmin: boolean
+) {
+  const postResult = await pool.query('SELECT * FROM posts WHERE id = $1', [id]);
+  if (postResult.rows.length === 0) return null;
+  const post = postResult.rows[0];
 
-  if (!isAdmin && post.rows[0].user_id !== user_id) {
+  // Security Check
+  if (!isAdmin && post.user_id !== user_id) {
     throw { code: 'UNAUTHORIZED', message: 'You can only edit your own posts' };
   }
 
-  // Sanitize input
-  const sanitizedTitle = data.title ? stripHtmlTags(data.title) : undefined;
-  const sanitizedContent = data.content ? stripHtmlTags(data.content) : undefined;
-
-  if (sanitizedTitle || sanitizedContent) {
-    const newTitle = sanitizedTitle || post.rows[0].title;
-    const newContent = sanitizedContent || post.rows[0].content;
-
-    const profanityCheck = await checkProfanity(newTitle + ' ' + newContent);
-
-    if (!profanityCheck.isClean) {
-      throw {
-        code: 'PROFANITY_DETECTED',
-        message: 'Content contains inappropriate language',
-        matchedWords: profanityCheck.matchedWords
-      };
-    }
+  // Profanity check on new content
+  if (data.title || data.content) {
+    const checkText = (data.title || post.title) + " " + (data.content || post.content);
+    const profanityCheck = await checkProfanity(checkText);
+    if (!profanityCheck.isClean) throw { code: 'PROFANITY_DETECTED', ...profanityCheck };
   }
 
-  const updates: string[] = [];
-  const values: any[] = [];
-  let paramCount = 1;
-
-  if (sanitizedTitle) {
-    updates.push(`title = $${paramCount++}`);
-    values.push(sanitizedTitle);
-  }
-  if (sanitizedContent) {
-    updates.push(`content = $${paramCount++}`);
-    values.push(sanitizedContent);
-  }
-
-  if (updates.length === 0) return post.rows[0];
-
-  values.push(id);
   const result = await pool.query(
-    `UPDATE posts SET ${updates.join(', ')}, updated_at = NOW() WHERE id = $${paramCount} RETURNING *`,
-    values
+    `UPDATE posts 
+     SET title = COALESCE($1, title), 
+         content = COALESCE($2, content), 
+         image_url = $3, -- 🆕 Update image (can be null)
+         updated_at = NOW() 
+     WHERE id = $4 RETURNING *`,
+    [data.title, data.content, data.imageUrl === undefined ? post.image_url : data.imageUrl, id]
   );
   return result.rows[0];
 }
@@ -352,4 +356,23 @@ export async function toggleLockPost(postId: string) {
   await pool.query('UPDATE posts SET is_locked = $1 WHERE id = $2', [newStatus, postId]);
   
   return { is_locked: newStatus };
+}
+
+
+// 2. NEW: Toggle Like
+export async function toggleLike(postId: string, userId: string) {
+  const existing = await pool.query(
+    'SELECT id FROM likes WHERE post_id = $1 AND user_id = $2', 
+    [postId, userId]
+  );
+  
+  if (existing.rows.length > 0) {
+    // Already liked, so we remove the like (Unlike)
+    await pool.query('DELETE FROM likes WHERE id = $1', [existing.rows[0].id]);
+    return { liked: false };
+  } else {
+    // Add new like
+    await pool.query('INSERT INTO likes (post_id, user_id) VALUES ($1, $2)', [postId, userId]);
+    return { liked: true };
+  }
 }

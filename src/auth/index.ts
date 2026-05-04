@@ -118,6 +118,8 @@ max: 100, // 100 requests per window per IP
 // User configuration with additional fields for Civic platform
 user: {
 additionalFields: {
+
+  
 // Username stores FIN for citizens
 username: {
 type: "string",
@@ -170,6 +172,12 @@ input: true,
     required: false,
     input: true,
   },
+
+   twoFactorEnabled: { // Matches the CamelCasePlugin
+      type: "boolean",
+      required: false,
+      input: false,
+    },
 },
 
 },

@@ -118,6 +118,336 @@ Better Auth provides these endpoints automatically at `/api/auth/*`:
 
 ---
 
+### Global Admin Dashboard Endpoints (Requires global admin/super_admin role)
+
+**Base Path:** `/api/admin/global`
+
+These endpoints provide system-wide statistics and insights for global administrators only. Access is restricted to admin or super_admin users with no bureau assignment.
+
+#### 1. Overview Statistics
+
+**GET** `/api/admin/global/stats/overview`
+
+Get high-level system overview statistics.
+
+**Headers:** `Authorization: Bearer <global_admin_token>`
+
+**Response (Success):**
+```json
+{
+  "success": true,
+  "data": {
+    "totalCitizens": 1250,
+    "totalBureaus": 15,
+    "totalAdmins": 45,
+    "totalPolls": 8,
+    "totalForumPosts": 320,
+    "totalSuggestions": 67,
+    "totalReports": 23
+  }
+}
+```
+
+#### 2. Detailed Statistics
+
+**GET** `/api/admin/global/stats/detailed`
+
+Get detailed breakdowns and insights.
+
+**Headers:** `Authorization: Bearer <global_admin_token>`
+
+**Response (Success):**
+```json
+{
+  "success": true,
+  "data": {
+    "citizensByRegion": {
+      "Addis Ababa": 450,
+      "Oromia": 320,
+      "Amhara": 280
+    },
+    "citizensByWorkType": {
+      "Government Employee": 380,
+      "Private Sector": 520,
+      "Student": 180
+    },
+    "citizensByGender": {
+      "male": 680,
+      "female": 570
+    },
+    "citizensByVerificationStatus": {
+      "verified": 1100,
+      "unverified": 150
+    },
+    "citizensByActivityLevel": {
+      "active": 980,
+      "inactive": 270
+    },
+    "adminsByBureau": {
+      "Ministry of Health": 12,
+      "Global": 8
+    },
+    "pollsByStatus": {
+      "active": 5,
+      "completed": 3
+    },
+    "forumsByCategory": {
+      "General": 3,
+      "Health": 2,
+      "Education": 1
+    },
+    "suggestionsByStatus": {
+      "pending": 45,
+      "responded": 22
+    },
+    "reportsByStatus": {
+      "open": 15,
+      "resolved": 8
+    }
+  }
+}
+```
+
+**Status Codes:**
+- `200` - Success
+- `403` - Access denied (not a global admin)
+- `500` - Server error
+
+---
+
+### Global Audit Endpoints (Super Admin Only)
+
+**Base Path:** `/api/admin/global/audit`
+
+These endpoints provide comprehensive audit logging and monitoring capabilities for super administrators. Access is restricted to super_admin users only.
+
+#### 1. Audit Statistics Overview
+
+**GET** `/api/admin/global/audit/stats`
+
+Get audit statistics and activity overview for the last 30 days.
+
+**Headers:** `Authorization: Bearer <super_admin_token>`
+
+**Response (Success):**
+```json
+{
+  "success": true,
+  "data": {
+    "admin_audit": {
+      "total_admin_actions": 1250,
+      "unique_admins": 45,
+      "bureaus_with_activity": 12,
+      "latest_admin_action": "2024-01-15T10:30:00Z"
+    },
+    "application_audit": {
+      "total_application_changes": 890,
+      "unique_admins_making_changes": 38,
+      "applications_modified": 567,
+      "latest_application_change": "2024-01-15T09:45:00Z"
+    },
+    "bureau_activity": [
+      {
+        "bureau_name": "Ministry of Health",
+        "bureau_id": "health-001",
+        "active_admins": 8,
+        "admin_actions": 145,
+        "applications_changed": 89
+      }
+    ],
+    "period": "last_30_days"
+  }
+}
+```
+
+#### 2. Admin Action Audit Logs
+
+**GET** `/api/admin/global/audit/admin-actions`
+
+Get all admin audit logs across all bureaus.
+
+**Headers:** `Authorization: Bearer <super_admin_token>`
+
+**Query Parameters:**
+- `bureauId` (optional) - Filter by bureau ID
+- `adminId` (optional) - Filter by admin ID
+- `action` (optional) - Filter by action type
+- `entityType` (optional) - Filter by entity type
+- `startDate` (optional) - Start date (ISO format)
+- `endDate` (optional) - End date (ISO format)
+- `limit` (optional, default: 100) - Number of results
+- `offset` (optional, default: 0) - Pagination offset
+
+**Response (Success):**
+```json
+{
+  "success": true,
+  "data": [
+    {
+      "id": "audit-123",
+      "admin_id": "admin-456",
+      "bureau_id": "health-001",
+      "action": "service_created",
+      "entity_type": "bureau_service",
+      "entity_id": "service-789",
+      "old_values": null,
+      "new_values": "{\"name\":\"New Health Service\",\"fee\":500}",
+      "metadata": "{\"ip\":\"192.168.1.1\"}",
+      "created_at": "2024-01-15T10:30:00Z",
+      "admin_name": "Dr. Sarah Johnson",
+      "admin_email": "sarah.johnson@health.gov.et",
+      "bureau_name": "Ministry of Health"
+    }
+  ],
+  "filters": {
+    "bureauId": null,
+    "limit": 100,
+    "offset": 0
+  }
+}
+```
+
+#### 3. Application Change Audit Logs
+
+**GET** `/api/admin/global/audit/application-changes`
+
+Get all application audit logs across all bureaus.
+
+**Headers:** `Authorization: Bearer <super_admin_token>`
+
+**Query Parameters:**
+- `bureauId` (optional) - Filter by bureau ID
+- `adminId` (optional) - Filter by admin ID who made changes
+- `startDate` (optional) - Start date (ISO format)
+- `endDate` (optional) - End date (ISO format)
+- `limit` (optional, default: 100) - Number of results
+- `offset` (optional, default: 0) - Pagination offset
+
+**Response (Success):**
+```json
+{
+  "success": true,
+  "data": [
+    {
+      "id": "app-audit-123",
+      "application_id": "app-456",
+      "changed_by": "admin-789",
+      "old_status": "submitted",
+      "new_status": "approved",
+      "action_notes": "Application approved after document verification",
+      "created_at": "2024-01-15T09:45:00Z",
+      "admin_name": "Ahmed Hassan",
+      "admin_email": "ahmed.hassan@transport.gov.et",
+      "bureau_name": "Ministry of Transport",
+      "service_type": "renewal",
+      "current_status": "approved",
+      "service_name": "Driver License Renewal"
+    }
+  ],
+  "filters": {
+    "bureauId": null,
+    "limit": 100,
+    "offset": 0
+  }
+}
+```
+
+#### 4. Combined Audit Logs
+
+**GET** `/api/admin/global/audit/combined`
+
+Get combined audit logs (both admin actions and application changes) in chronological order.
+
+**Headers:** `Authorization: Bearer <super_admin_token>`
+
+**Query Parameters:** Same as above endpoints
+
+**Response (Success):**
+```json
+{
+  "success": true,
+  "data": [
+    {
+      "id": "audit-123",
+      "admin_id": "admin-456",
+      "bureau_id": "health-001",
+      "action": "service_created",
+      "entity_type": "bureau_service",
+      "created_at": "2024-01-15T10:30:00Z",
+      "admin_name": "Dr. Sarah Johnson",
+      "bureau_name": "Ministry of Health",
+      "log_type": "admin_action"
+    },
+    {
+      "id": "app-audit-124",
+      "application_id": "app-456",
+      "old_status": "submitted",
+      "new_status": "approved",
+      "created_at": "2024-01-15T09:45:00Z",
+      "admin_name": "Ahmed Hassan",
+      "bureau_name": "Ministry of Transport",
+      "log_type": "application_change"
+    }
+  ]
+}
+```
+
+#### 5. Audit Logs by Entity Type
+
+**GET** `/api/admin/global/audit/entity/{entityType}`
+
+Get audit logs filtered by specific entity type (e.g., 'bureau_service', 'user', 'application').
+
+**Headers:** `Authorization: Bearer <super_admin_token>`
+
+**Path Parameters:**
+- `entityType` - The entity type to filter by
+
+**Query Parameters:** Same as admin-actions endpoint
+
+#### 6. Security Audit Logs
+
+**GET** `/api/admin/global/audit/security`
+
+Get security-related audit logs (login attempts, permission changes, user suspensions, etc.).
+
+**Headers:** `Authorization: Bearer <super_admin_token>`
+
+**Query Parameters:**
+- `bureauId` (optional) - Filter by bureau ID
+- `startDate` (optional) - Start date (ISO format)
+- `endDate` (optional) - End date (ISO format)
+- `limit` (optional, default: 100) - Number of results
+- `offset` (optional, default: 0) - Pagination offset
+
+**Response (Success):**
+```json
+{
+  "success": true,
+  "data": [
+    {
+      "id": "security-123",
+      "admin_id": "admin-456",
+      "bureau_id": null,
+      "action": "login",
+      "entity_type": "user",
+      "entity_id": "admin-456",
+      "created_at": "2024-01-15T08:30:00Z",
+      "admin_name": "Super Admin",
+      "admin_email": "super@admin.gov.et",
+      "bureau_name": null
+    }
+  ]
+}
+```
+
+**Status Codes:**
+- `200` - Success
+- `403` - Access denied (not a super admin)
+- `500` - Server error
+
+---
+
 ### Citizen Authentication Endpoints (Fayda Integration)
 
 **Base Path:** `/api/citizen`

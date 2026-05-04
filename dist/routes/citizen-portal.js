@@ -1,6 +1,7 @@
 import { Hono } from 'hono';
 import { citizenAuth } from '../middleware/citizen-auth.js';
-import { verifyExternalRecord, submitApplication, processMockPayment, getCitizenApplications, getLicenseInfo, addApplicationComment, getApplicationComments, getPublicBureauServices } from '../services/agency.js';
+import { pool } from '../db/pool.js';
+import { verifyExternalRecord, submitApplication, processMockPayment, getCitizenApplications, getLicenseInfo, addApplicationComment, getApplicationComments, getPublicBureauServices, updateApplicationByCitizen, cancelApplicationByCitizen, getUserActivityLogs, getActiveAnnouncements } from '../services/agency.js';
 const citizenPortal = new Hono();
 /**
  * 🏛️ GOVERNMENT AGENCY PORTAL - CITIZEN ROUTES
@@ -111,6 +112,75 @@ citizenPortal.get('/:id/comments', citizenAuth(), async (c) => {
         const { id } = c.req.param();
         const comments = await getApplicationComments(id);
         return c.json({ success: true, data: comments });
+    }
+    catch (error) {
+        return c.json({ success: false, error: error.message }, 500);
+    }
+});
+/**
+ * PUT /api/portal/applications/:id
+ * Citizen updates their own application (Delivery or Documents)
+ */
+citizenPortal.put('/applications/:id', citizenAuth(), async (c) => {
+    try {
+        const { id } = c.req.param();
+        const userId = c.get('user_id');
+        const { deliveryMethod, documents } = await c.req.json();
+        const updated = await updateApplicationByCitizen(id, userId, { deliveryMethod, documents });
+        return c.json({
+            success: true,
+            message: 'Application details updated',
+            data: updated
+        });
+    }
+    catch (error) {
+        return c.json({ success: false, error: error.message }, 400);
+    }
+});
+/**
+ * 🆕 CANCEL: POST /api/portal/applications/:id/cancel
+ * Citizen withdraws their application
+ * FIXED: Added () to citizenAuth
+ */
+citizenPortal.post('/applications/:id/cancel', citizenAuth(), async (c) => {
+    try {
+        const { id } = c.req.param();
+        const userId = c.get('user_id');
+        const result = await cancelApplicationByCitizen(id, userId);
+        return c.json({
+            success: true,
+            message: 'Application withdrawn successfully',
+            data: result
+        });
+    }
+    catch (error) {
+        return c.json({ success: false, error: error.message }, 400);
+    }
+});
+citizenPortal.get('/notifications', citizenAuth(), async (c) => {
+    try {
+        const userId = c.get('user_id');
+        const logs = await getUserActivityLogs(userId);
+        return c.json({ success: true, data: logs });
+    }
+    catch (error) {
+        return c.json({ success: false, error: error.message }, 500);
+    }
+});
+// 9. Get System Announcements (Public News)
+citizenPortal.get('/announcements', async (c) => {
+    try {
+        // For citizens, get bureau-specific announcements if they have a bureau, otherwise global only
+        const userId = c.get('user_id');
+        let bureauId;
+        if (userId) {
+            // Get user's bureau if they have one
+            const userResult = await pool.query('SELECT bureau_id FROM "user" WHERE id = $1', [userId]);
+            bureauId = userResult.rows[0]?.bureau_id;
+        }
+        const limit = parseInt(c.req.query('limit') || '10');
+        const news = await getActiveAnnouncements(bureauId, limit);
+        return c.json({ success: true, data: news });
     }
     catch (error) {
         return c.json({ success: false, error: error.message }, 500);

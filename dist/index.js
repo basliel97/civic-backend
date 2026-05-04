@@ -12,6 +12,8 @@ import workTypesRoutes from './routes/work-types.js';
 import citizenPortalRoutes from './routes/citizen-portal.js';
 import agencyAdminRoutes from './routes/agency-admin.js';
 import agencyManagementRoutes from './routes/agency-management.js';
+import globalAdminRoutes from './routes/global-admin.js';
+import globalAuditRoutes from './routes/global-audit.js';
 const app = new Hono();
 // CORS Configuration
 app.use('/*', cors({
@@ -43,6 +45,10 @@ app.route('/api/portal', citizenPortalRoutes);
 app.route('/api/admin/agency', agencyAdminRoutes);
 // Mount Agency Staff Management routes
 app.route('/api/admin/agency', agencyManagementRoutes);
+// Mount Global Admin Dashboard
+app.route('/api/admin/global', globalAdminRoutes);
+// Mount Global Audit routes (Super Admin Only)
+app.route('/api/admin/global/audit', globalAuditRoutes);
 // Health Check
 app.get('/', (c) => {
     return c.json({

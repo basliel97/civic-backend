@@ -1,0 +1,78 @@
+import { pool } from '../db/pool.js';
+/**
+ * Get high-level overview statistics for global admins
+ */
+export async function getGlobalAdminStatsOverview() {
+    // Total citizens (role = 'citizen')
+    const citizensResult = await pool.query("SELECT COUNT(*) as count FROM \"user\" WHERE role = 'citizen' AND deleted_at IS NULL");
+    // Total bureaus
+    const bureausResult = await pool.query('SELECT COUNT(*) as count FROM bureaus');
+    // Total admins (role = 'admin' or 'super_admin')
+    const adminsResult = await pool.query("SELECT COUNT(*) as count FROM \"user\" WHERE role IN ('admin', 'super_admin') AND deleted_at IS NULL");
+    // Total polls
+    const pollsResult = await pool.query('SELECT COUNT(*) as count FROM polls');
+    // Total forum posts
+    const forumPostsResult = await pool.query('SELECT COUNT(*) as count FROM posts WHERE status = \'active\'');
+    // Total suggestions
+    const suggestionsResult = await pool.query('SELECT COUNT(*) as count FROM suggestions');
+    // Total reports
+    const reportsResult = await pool.query('SELECT COUNT(*) as count FROM reports');
+    return {
+        totalCitizens: parseInt(citizensResult.rows[0].count),
+        totalBureaus: parseInt(bureausResult.rows[0].count),
+        totalAdmins: parseInt(adminsResult.rows[0].count),
+        totalPolls: parseInt(pollsResult.rows[0].count),
+        totalForumPosts: parseInt(forumPostsResult.rows[0].count),
+        totalSuggestions: parseInt(suggestionsResult.rows[0].count),
+        totalReports: parseInt(reportsResult.rows[0].count),
+    };
+}
+/**
+ * Get detailed statistics with breakdowns for global admins
+ */
+export async function getGlobalAdminStatsDetailed() {
+    // Citizens by region (assuming region field exists)
+    const citizensByRegionResult = await pool.query("SELECT region, COUNT(*) as count FROM \"user\" WHERE role = 'citizen' AND deleted_at IS NULL AND region IS NOT NULL GROUP BY region");
+    const citizensByRegion = Object.fromEntries(citizensByRegionResult.rows.map(row => [row.region, parseInt(row.count)]));
+    // Citizens by work type
+    const citizensByWorkTypeResult = await pool.query("SELECT work_type, COUNT(*) as count FROM \"user\" WHERE role = 'citizen' AND deleted_at IS NULL AND work_type IS NOT NULL GROUP BY work_type");
+    const citizensByWorkType = Object.fromEntries(citizensByWorkTypeResult.rows.map(row => [row.work_type, parseInt(row.count)]));
+    // Citizens by gender
+    const citizensByGenderResult = await pool.query("SELECT gender, COUNT(*) as count FROM \"user\" WHERE role = 'citizen' AND deleted_at IS NULL AND gender IS NOT NULL GROUP BY gender");
+    const citizensByGender = Object.fromEntries(citizensByGenderResult.rows.map(row => [row.gender, parseInt(row.count)]));
+    // Citizens by verification status (email_verified)
+    const citizensByVerificationResult = await pool.query("SELECT email_verified, COUNT(*) as count FROM \"user\" WHERE role = 'citizen' AND deleted_at IS NULL GROUP BY email_verified");
+    const citizensByVerificationStatus = Object.fromEntries(citizensByVerificationResult.rows.map(row => [row.email_verified ? 'verified' : 'unverified', parseInt(row.count)]));
+    // Citizens by activity level (based on last_login_at, e.g., active within 30 days)
+    const thirtyDaysAgo = new Date();
+    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
+    const citizensByActivityResult = await pool.query("SELECT CASE WHEN last_login_at >= $1 THEN 'active' ELSE 'inactive' END as activity, COUNT(*) as count FROM \"user\" WHERE role = 'citizen' AND deleted_at IS NULL GROUP BY activity", [thirtyDaysAgo.toISOString()]);
+    const citizensByActivityLevel = Object.fromEntries(citizensByActivityResult.rows.map(row => [row.activity, parseInt(row.count)]));
+    // Admins by bureau
+    const adminsByBureauResult = await pool.query("SELECT b.name as bureau_name, COUNT(u.id) as count FROM \"user\" u LEFT JOIN bureaus b ON u.bureau_id = b.id WHERE u.role IN ('admin', 'super_admin') AND u.deleted_at IS NULL GROUP BY b.name");
+    const adminsByBureau = Object.fromEntries(adminsByBureauResult.rows.map(row => [row.bureau_name || 'Global', parseInt(row.count)]));
+    // Polls by status
+    const pollsByStatusResult = await pool.query('SELECT status, COUNT(*) as count FROM polls GROUP BY status');
+    const pollsByStatus = Object.fromEntries(pollsByStatusResult.rows.map(row => [row.status, parseInt(row.count)]));
+    // Forums by category
+    const forumsByCategoryResult = await pool.query('SELECT category, COUNT(*) as count FROM forums GROUP BY category');
+    const forumsByCategory = Object.fromEntries(forumsByCategoryResult.rows.map(row => [row.category, parseInt(row.count)]));
+    // Suggestions by status
+    const suggestionsByStatusResult = await pool.query('SELECT status, COUNT(*) as count FROM suggestions GROUP BY status');
+    const suggestionsByStatus = Object.fromEntries(suggestionsByStatusResult.rows.map(row => [row.status, parseInt(row.count)]));
+    // Reports by status
+    const reportsByStatusResult = await pool.query('SELECT status, COUNT(*) as count FROM reports GROUP BY status');
+    const reportsByStatus = Object.fromEntries(reportsByStatusResult.rows.map(row => [row.status, parseInt(row.count)]));
+    return {
+        citizensByRegion,
+        citizensByWorkType,
+        citizensByGender,
+        citizensByVerificationStatus,
+        citizensByActivityLevel,
+        adminsByBureau,
+        pollsByStatus,
+        forumsByCategory,
+        suggestionsByStatus,
+        reportsByStatus,
+    };
+}

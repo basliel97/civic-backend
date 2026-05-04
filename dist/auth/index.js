@@ -144,6 +144,16 @@ export const auth = betterAuth({
                 required: false,
                 input: false,
             },
+            bureauId: {
+                type: "string",
+                required: false,
+                input: true,
+            },
+            twoFactorEnabled: {
+                type: "boolean",
+                required: false,
+                input: false,
+            },
         },
     },
     // Plugins configuration

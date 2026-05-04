@@ -8,15 +8,15 @@ export async function getBureauById(id) {
     return result.rows[0];
 }
 export async function createBureau(data) {
-    const result = await pool.query(`INSERT INTO bureaus (name, description, contact_email, phone, address)
-     VALUES ($1, $2, $3, $4, $5) RETURNING *`, [data.name, data.description || null, data.contact_email || null, data.phone || null, data.address || null]);
+    const result = await pool.query(`INSERT INTO bureaus (name, description, contact_email, phone, address, icon_url)
+     VALUES ($1, $2, $3, $4, $5, $6) RETURNING *`, [data.name, data.description || null, data.contact_email || null, data.phone || null, data.address || null, data.icon_url || null]);
     return result.rows[0];
 }
 export async function updateBureau(id, data) {
     const updates = [];
     const values = [];
     let paramCount = 1;
-    const fields = ['name', 'description', 'contact_email', 'phone', 'address', 'status'];
+    const fields = ['name', 'description', 'contact_email', 'phone', 'address', 'status', 'icon_url'];
     for (const field of fields) {
         if (data[field] !== undefined) {
             updates.push(`${field} = $${paramCount++}`);

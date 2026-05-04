@@ -75,6 +75,23 @@ async function runTransportMigration() {
     `);
     console.log('✅ application_audit_logs table created');
 
+    // 5. Admin Audit Logs (For staff, service, and general admin actions)
+    await client.query(`
+      CREATE TABLE IF NOT EXISTS admin_audit_logs (
+        id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+        admin_id UUID REFERENCES "user"(id) ON DELETE SET NULL,
+        bureau_id UUID REFERENCES bureaus(id) ON DELETE SET NULL,
+        action VARCHAR(100) NOT NULL, -- e.g., 'create_staff', 'update_service', 'delete_service', 'review_application'
+        entity_type VARCHAR(50) NOT NULL, -- 'user', 'bureau_service', 'transport_applications', 'application_comments'
+        entity_id UUID,
+        old_values JSONB,
+        new_values JSONB,
+        metadata JSONB,
+        created_at TIMESTAMP DEFAULT NOW()
+      )
+    `);
+    console.log('✅ admin_audit_logs table created');
+
     // --- SEED MOCK DATA FOR TESTING ---
     console.log('🌱 Seeding mock external records for testing...');
     
