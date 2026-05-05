@@ -2,6 +2,7 @@ import { Hono } from 'hono';
 import { adminAuth } from '../middleware/auth.js';
 import { getGlobalAdminStatsOverview, getGlobalAdminStatsDetailed } from '../services/global-admin.js';
 import { getGlobalAnnouncements, createGlobalAnnouncement, updateAnnouncement, deleteAnnouncement } from '../services/agency.js';
+import { pool } from '../db/pool.js';
 const globalAdmin = new Hono();
 /**
  * 🔒 SECURITY: Global Admin Access Only
@@ -103,6 +104,54 @@ globalAdmin.delete('/announcements/:id', async (c) => {
     }
     catch (error) {
         console.error('[Global Admin] Delete announcement error:', error);
+        return c.json({ success: false, error: error.message }, 500);
+    }
+});
+/**
+ * 👤 GLOBAL ADMIN PROFILE MANAGEMENT
+ */
+// Get Own Profile
+globalAdmin.get('/profile', async (c) => {
+    try {
+        const adminId = c.get('user_id');
+        const result = await pool.query(`SELECT id, name, email, role, image, created_at, updated_at
+       FROM "user"
+       WHERE id = $1 AND bureau_id IS NULL`, [adminId]);
+        if (result.rows.length === 0) {
+            return c.json({ success: false, error: 'Profile not found' }, 404);
+        }
+        return c.json({
+            success: true,
+            data: result.rows[0]
+        });
+    }
+    catch (error) {
+        console.error('[Global Admin] Get profile error:', error);
+        return c.json({ success: false, error: error.message }, 500);
+    }
+});
+// Update Own Profile (Name/Image)
+globalAdmin.put('/profile', async (c) => {
+    try {
+        const adminId = c.get('user_id');
+        const { name, image } = await c.req.json();
+        const result = await pool.query(`UPDATE "user"
+       SET name = COALESCE($1, name),
+           image = COALESCE($2, image),
+           updated_at = NOW()
+       WHERE id = $3 AND bureau_id IS NULL
+       RETURNING id, name, email, image`, [name, image, adminId]);
+        if (result.rows.length === 0) {
+            return c.json({ success: false, error: 'Profile not found or update failed' }, 404);
+        }
+        return c.json({
+            success: true,
+            message: 'Profile updated successfully',
+            data: result.rows[0]
+        });
+    }
+    catch (error) {
+        console.error('[Global Admin] Update profile error:', error);
         return c.json({ success: false, error: error.message }, 500);
     }
 });

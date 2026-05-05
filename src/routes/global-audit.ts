@@ -5,6 +5,7 @@ import {
   getGlobalAuditStats,
   getGlobalSecurityLogs
 } from '../services/global-audit.js';
+import { getPlatformGrowthTrends } from '../services/global-admin.js';
 
 const globalAuditRoutes = new Hono<{ Variables: AuthContext }>();
 
@@ -45,4 +46,17 @@ globalAuditRoutes.get('/security', async (c) => {
   }
 });
 
+
+globalAuditRoutes.get('/stats/growth', async (c) => {
+  try {
+    const trends = await getPlatformGrowthTrends();
+    
+    return c.json({ 
+      success: true, 
+      data: trends 
+    });
+  } catch (error: any) {
+    return c.json({ success: false, error: error.message }, 500);
+  }
+});
 export default globalAuditRoutes;

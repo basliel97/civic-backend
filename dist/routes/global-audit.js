@@ -1,6 +1,7 @@
 import { Hono } from 'hono';
 import { adminAuth, globalSuperAdminAuth } from '../middleware/auth.js';
 import { getGlobalSystemAuditLogs, getGlobalAuditStats, getGlobalSecurityLogs } from '../services/global-audit.js';
+import { getPlatformGrowthTrends } from '../services/global-admin.js';
 const globalAuditRoutes = new Hono();
 // 🔒 SECURITY: Strictly for Global Super Admins (bureau_id must be null)
 globalAuditRoutes.use('/*', adminAuth());
@@ -32,6 +33,18 @@ globalAuditRoutes.get('/security', async (c) => {
     try {
         const logs = await getGlobalSecurityLogs();
         return c.json({ success: true, data: logs });
+    }
+    catch (error) {
+        return c.json({ success: false, error: error.message }, 500);
+    }
+});
+globalAuditRoutes.get('/stats/growth', async (c) => {
+    try {
+        const trends = await getPlatformGrowthTrends();
+        return c.json({
+            success: true,
+            data: trends
+        });
     }
     catch (error) {
         return c.json({ success: false, error: error.message }, 500);
