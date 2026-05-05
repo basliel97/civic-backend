@@ -165,13 +165,25 @@ civicAdmin.post('/posts/:id/pin', adminAuth(), async (c) => {
 
 civicAdmin.post('/posts/:id/lock', adminAuth(), async (c) => {
   try {
+    const adminId = c.get('user_id');
     const { id } = c.req.param();
+
+    // Get old values for audit
+    const oldPostResult = await pool.query('SELECT * FROM posts WHERE id = $1', [id]);
+    if (oldPostResult.rows.length === 0) {
+      return c.json({ success: false, error: 'Post not found' }, 404);
+    }
+    const oldPost = oldPostResult.rows[0];
+
     const result = await toggleLockPost(id);
-    
+
     if (!result) {
       return c.json({ success: false, error: 'Post not found' }, 404);
     }
-    
+
+    // Log admin action
+    await logAdminAction(adminId, null, 'LOCK_FORUM_POST', 'post', id, oldPost, result, {});
+
     return c.json({ success: true, data: result });
   } catch (error: any) {
     console.error('[Admin] Lock post error:', error);

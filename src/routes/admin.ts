@@ -2,6 +2,7 @@ import { Hono } from "hono";
 import bcrypt from "bcrypt";
 import { pool } from "../db/pool.js";
 import { adminAuth, type AuthContext } from "../middleware/auth.js";
+import { logAdminAction } from "../services/agency.js";
 
 /**
  * Admin Management Routes
