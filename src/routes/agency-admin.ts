@@ -632,7 +632,7 @@ agencyAdmin.get('/profile', async (c) => {
 
     // We join with the bureaus table so the admin sees their agency name too
     const result = await pool.query(
-      `SELECT u.id, u.name, u.email, u.role, u.image, 
+      `SELECT u.id, u.name, u.email, u.role, u.image, u.phone_number,
               u.bureau_id AS "bureauId", b.name AS "bureauName"
        FROM "user" u
        LEFT JOIN bureaus b ON u.bureau_id = b.id
@@ -653,26 +653,27 @@ agencyAdmin.get('/profile', async (c) => {
   }
 });
 
-// 2. Update Own Profile (Name/Image)
+// 2. Update Own Profile (Name/Image/Phone)
 agencyAdmin.put('/profile', async (c) => {
   try {
     const adminId = c.get('user_id');
-    const { name, image } = await c.req.json();
+    const { name, image, phone_number } = await c.req.json();
 
     const result = await pool.query(
-      `UPDATE "user" 
-       SET name = COALESCE($1, name), 
-           image = COALESCE($2, image), 
-           updated_at = NOW() 
-       WHERE id = $3 
-       RETURNING id, name, email, image`,
-      [name, image, adminId]
+      `UPDATE "user"
+       SET name = COALESCE($1, name),
+           image = COALESCE($2, image),
+           phone_number = COALESCE($3, phone_number),
+           updated_at = NOW()
+       WHERE id = $4
+       RETURNING id, name, email, phone_number, image`,
+      [name, image, phone_number, adminId]
     );
 
-    return c.json({ 
-      success: true, 
-      message: "Profile updated successfully", 
-      data: result.rows[0] 
+    return c.json({
+      success: true,
+      message: "Profile updated successfully",
+      data: result.rows[0]
     });
   } catch (error: any) {
     return c.json({ success: false, error: error.message }, 500);

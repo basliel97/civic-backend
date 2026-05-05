@@ -126,7 +126,7 @@ globalAdmin.get('/profile', async (c) => {
     const adminId = c.get('user_id');
 
     const result = await pool.query(
-      `SELECT id, name, email, role, image, created_at, updated_at
+      `SELECT id, name, email, role, image, phone_number, created_at, updated_at
        FROM "user"
        WHERE id = $1 AND bureau_id IS NULL`,
       [adminId]
@@ -146,20 +146,21 @@ globalAdmin.get('/profile', async (c) => {
   }
 });
 
-// Update Own Profile (Name/Image)
+// Update Own Profile (Name/Image/Phone)
 globalAdmin.put('/profile', async (c) => {
   try {
     const adminId = c.get('user_id');
-    const { name, image } = await c.req.json();
+    const { name, image, phone_number } = await c.req.json();
 
     const result = await pool.query(
       `UPDATE "user"
        SET name = COALESCE($1, name),
            image = COALESCE($2, image),
+           phone_number = COALESCE($3, phone_number),
            updated_at = NOW()
-       WHERE id = $3 AND bureau_id IS NULL
-       RETURNING id, name, email, image`,
-      [name, image, adminId]
+       WHERE id = $4 AND bureau_id IS NULL
+       RETURNING id, name, email, phone_number, image`,
+      [name, image, phone_number, adminId]
     );
 
     if (result.rows.length === 0) {
