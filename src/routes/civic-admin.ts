@@ -100,12 +100,16 @@ civicAdmin.post('/forums', adminAuth(), async (c) => {
   try {
     const adminId = c.get('user_id');
     const data = await c.req.json();
-    
+
     if (!data.name) {
       return c.json({ success: false, error: 'Name is required' }, 400);
     }
-    
+
     const forum = await createForum(data, adminId);
+
+    // Log admin action
+    await logAdminAction(adminId, null, 'CREATE_FORUM', 'forum', forum.id, null, forum, {});
+
     return c.json({ success: true, data: forum }, 201);
   } catch (error: any) {
     console.error('[Admin] Create forum error:', error);
@@ -115,15 +119,26 @@ civicAdmin.post('/forums', adminAuth(), async (c) => {
 
 civicAdmin.put('/forums/:id', adminAuth(), async (c) => {
   try {
+    const adminId = c.get('user_id');
     const { id } = c.req.param();
     const data = await c.req.json();
-    
+
+    // Get old values for audit
+    const oldForumResult = await pool.query('SELECT * FROM forums WHERE id = $1', [id]);
+    if (oldForumResult.rows.length === 0) {
+      return c.json({ success: false, error: 'Forum not found' }, 404);
+    }
+    const oldForum = oldForumResult.rows[0];
+
     const forum = await updateForum(id, data);
-    
+
     if (!forum) {
       return c.json({ success: false, error: 'Forum not found' }, 404);
     }
-    
+
+    // Log admin action
+    await logAdminAction(adminId, null, 'UPDATE_FORUM', 'forum', id, oldForum, data, {});
+
     return c.json({ success: true, data: forum });
   } catch (error: any) {
     console.error('[Admin] Update forum error:', error);
@@ -133,13 +148,25 @@ civicAdmin.put('/forums/:id', adminAuth(), async (c) => {
 
 civicAdmin.delete('/forums/:id', adminAuth(), async (c) => {
   try {
+    const adminId = c.get('user_id');
     const { id } = c.req.param();
+
+    // Get old values for audit
+    const oldForumResult = await pool.query('SELECT * FROM forums WHERE id = $1', [id]);
+    if (oldForumResult.rows.length === 0) {
+      return c.json({ success: false, error: 'Forum not found' }, 404);
+    }
+    const oldForum = oldForumResult.rows[0];
+
     const forum = await deleteForum(id);
-    
+
     if (!forum) {
       return c.json({ success: false, error: 'Forum not found' }, 404);
     }
-    
+
+    // Log admin action
+    await logAdminAction(adminId, null, 'DELETE_FORUM', 'forum', id, oldForum, null, {});
+
     return c.json({ success: true, message: 'Forum deleted' });
   } catch (error: any) {
     console.error('[Admin] Delete forum error:', error);

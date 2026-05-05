@@ -2,6 +2,7 @@ import { Hono } from "hono";
 import bcrypt from "bcrypt";
 import { pool } from "../db/pool.js";
 import { adminAuth, superAdminAuth } from "../middleware/auth.js";
+import { logAdminAction } from "../services/agency.js";
 /**
  * Citizen Management Routes
  * Complete CRUD operations with audit tracking
@@ -108,6 +109,8 @@ citizenManagement.post("/citizens", adminAuth(), async (c) => {
         const citizenData = await pool.query(`SELECT id, username, name, email, phone_number, status,
         created_at, fin, dob, gender, image
       FROM "user" WHERE id = $1`, [user_id]);
+        // Log admin action
+        await logAdminAction(adminId, null, 'CREATE_CITIZEN', 'user', user_id, null, citizenData.rows[0], {});
         return c.json({
             success: true,
             message: "Citizen created successfully",
