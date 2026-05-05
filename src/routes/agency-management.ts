@@ -34,7 +34,7 @@ agencyManagement.post('/create-agency-head', adminAuth(), globalSuperAdminAuth()
     );
 
     // Log admin action
-    await logAdminAction(adminId, null, 'create_agency_head', 'user', userResult.user.id,
+    await logAdminAction(adminId, null, 'CREATE_AGENCY_HEAD', 'user', userResult.user.id,
       null,
       { email, name, role: 'super_admin', bureau_id: bureauId },
       { created_by: adminId }

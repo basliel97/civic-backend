@@ -26,7 +26,7 @@ agencyManagement.post('/create-agency-head', adminAuth(), globalSuperAdminAuth()
             throw new Error("Failed to create user");
         await pool.query(`UPDATE "user" SET role = 'super_admin', bureau_id = $1, status = 'active' WHERE id = $2`, [bureauId, userResult.user.id]);
         // Log admin action
-        await logAdminAction(adminId, null, 'create_agency_head', 'user', userResult.user.id, null, { email, name, role: 'super_admin', bureau_id: bureauId }, { created_by: adminId });
+        await logAdminAction(adminId, null, 'CREATE_AGENCY_HEAD', 'user', userResult.user.id, null, { email, name, role: 'super_admin', bureau_id: bureauId }, { created_by: adminId });
         return c.json({ success: true, message: `Agency Head created for ${bureauCheck.rows[0].name}` }, 201);
     }
     catch (error) {

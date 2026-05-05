@@ -1,7 +1,7 @@
 import { Hono } from 'hono';
 import { citizenAuth } from '../middleware/citizen-auth.js';
 import { pool } from '../db/pool.js';
-import { verifyExternalRecord, submitApplication, processMockPayment, getCitizenApplications, getLicenseInfo, addApplicationComment, getApplicationComments, getPublicBureauServices, updateApplicationByCitizen, cancelApplicationByCitizen, getUserActivityLogs, getActiveAnnouncements } from '../services/agency.js';
+import { verifyExternalRecord, submitApplication, processMockPayment, getCitizenApplications, getLicenseInfo, addApplicationComment, getApplicationComments, getPublicBureauServices, updateApplicationByCitizen, cancelApplicationByCitizen, getUserActivityLogs, getActiveAnnouncements, deleteApplicationByCitizen } from '../services/agency.js';
 const citizenPortal = new Hono();
 /**
  * 🏛️ GOVERNMENT AGENCY PORTAL - CITIZEN ROUTES
@@ -184,6 +184,17 @@ citizenPortal.get('/announcements', async (c) => {
     }
     catch (error) {
         return c.json({ success: false, error: error.message }, 500);
+    }
+});
+citizenPortal.delete('/applications/:id', citizenAuth(), async (c) => {
+    try {
+        const { id } = c.req.param();
+        const userId = c.get('user_id');
+        await deleteApplicationByCitizen(id, userId);
+        return c.json({ success: true, message: 'Record removed from history' });
+    }
+    catch (error) {
+        return c.json({ success: false, error: error.message }, 400);
     }
 });
 export default citizenPortal;

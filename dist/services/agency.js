@@ -69,11 +69,22 @@ export async function processMockPayment(applicationId, userId) {
         client.release();
     }
 }
+export async function deleteApplicationByCitizen(appId, userId) {
+    const result = await pool.query(`DELETE FROM transport_applications 
+     WHERE id = $1 AND user_id = $2 AND application_status = 'cancelled'
+     RETURNING id`, [appId, userId]);
+    if (result.rows.length === 0) {
+        throw new Error('You can only delete applications that are already cancelled.');
+    }
+    return true;
+}
 export async function getCitizenApplications(userId) {
-    const result = await pool.query(`SELECT ta.*, bs.service_name, bs.service_description
+    const result = await pool.query(`SELECT 
+        ta.*, 
+        bs.service_name -- 🆕 Fetch the real name from the joined table
      FROM transport_applications ta
      LEFT JOIN bureau_services bs ON ta.service_id = bs.id
-     WHERE ta.user_id = $1
+     WHERE ta.user_id = $1 
      ORDER BY ta.created_at DESC`, [userId]);
     return result.rows;
 }
@@ -797,32 +808,12 @@ export async function updateApplicationByCitizen(appId, userId, data) {
  * Soft deletes the application so it stays in history but stops being active.
  */
 export async function cancelApplicationByCitizen(appId, userId) {
-    const client = await pool.connect();
-    try {
-        await client.query('BEGIN');
-        // Ownership and payment status check
-        const check = await client.query(`SELECT id FROM transport_applications 
-       WHERE id = $1 AND user_id = $2 AND payment_status = 'pending'`, [appId, userId]);
-        if (check.rows.length === 0) {
-            throw new Error('Cannot cancel: Application already paid or processed');
-        }
-        // Set application_status to 'cancelled'
-        const result = await client.query(`UPDATE transport_applications 
-       SET application_status = 'cancelled', updated_at = NOW() 
-       WHERE id = $1 RETURNING *`, [appId]);
-        // Create an audit log entry for the withdrawal
-        await client.query(`INSERT INTO application_audit_logs (application_id, new_status, action_notes) 
-       VALUES ($1, 'cancelled', 'Citizen withdrew application before payment')`, [appId]);
-        await client.query('COMMIT');
-        return result.rows[0];
+    const check = await pool.query(`SELECT application_status FROM transport_applications WHERE id = $1 AND user_id = $2`, [appId, userId]);
+    const status = check.rows[0]?.application_status;
+    if (status === 'approved' || status === 'rejected') {
+        throw new Error('Cannot cancel: Government has already finalized this request.');
     }
-    catch (error) {
-        await client.query('ROLLBACK');
-        throw error;
-    }
-    finally {
-        client.release();
-    }
+    return await pool.query(`UPDATE transport_applications SET application_status = 'cancelled', updated_at = NOW() WHERE id = $1 RETURNING *`, [appId]);
 }
 export async function cancelApplication(applicationId, adminId, reason) {
     const client = await pool.connect();

@@ -1,6 +1,7 @@
 import { Hono } from 'hono';
 import { pool } from '../db/pool.js';
 import { adminAuth, superAdminAuth } from '../middleware/auth.js';
+import { logAdminAction } from '../services/agency.js';
 import { getBannedWords, addBannedWord, deleteBannedWord, bulkAddBannedWords } from '../services/profanity.js';
 import { getForums, createForum, updateForum, deleteForum, togglePinPost, toggleLockPost } from '../services/forum.js';
 import { getPolls, getPollById, createPoll, updatePoll, deletePoll, getPollResults, getAllPollsForAdmin } from '../services/poll.js';
@@ -25,6 +26,8 @@ civicAdmin.post('/banned-words', adminAuth(), async (c) => {
             return c.json({ success: false, error: 'Word is required' }, 400);
         }
         const result = await addBannedWord(word, severity || 'medium', language || 'both', adminId);
+        // Log admin action
+        await logAdminAction(adminId, null, 'ADD_BANNED_WORD', 'profanity_filter', result.id, null, result, {});
         return c.json({ success: true, data: result }, 201);
     }
     catch (error) {
@@ -34,11 +37,20 @@ civicAdmin.post('/banned-words', adminAuth(), async (c) => {
 });
 civicAdmin.delete('/banned-words/:id', adminAuth(), async (c) => {
     try {
+        const adminId = c.get('user_id');
         const { id } = c.req.param();
+        // Get old values for audit
+        const oldWordResult = await pool.query('SELECT * FROM banned_words WHERE id = $1', [id]);
+        if (oldWordResult.rows.length === 0) {
+            return c.json({ success: false, error: 'Word not found' }, 404);
+        }
+        const oldWord = oldWordResult.rows[0];
         const result = await deleteBannedWord(id);
         if (!result) {
             return c.json({ success: false, error: 'Word not found' }, 404);
         }
+        // Log admin action
+        await logAdminAction(adminId, null, 'REMOVE_BANNED_WORD', 'profanity_filter', id, oldWord, null, {});
         return c.json({ success: true, message: 'Word deleted' });
     }
     catch (error) {
@@ -289,11 +301,14 @@ civicAdmin.get('/bureaus', adminAuth(), async (c) => {
 });
 civicAdmin.post('/bureaus', adminAuth(), async (c) => {
     try {
+        const adminId = c.get('user_id');
         const data = await c.req.json();
         if (!data.name) {
             return c.json({ success: false, error: 'Name is required' }, 400);
         }
         const bureau = await createBureau(data);
+        // Log admin action
+        await logAdminAction(adminId, null, 'CREATE_BUREAU', 'bureau', bureau.id, null, bureau, {});
         return c.json({ success: true, data: bureau }, 201);
     }
     catch (error) {
@@ -303,12 +318,21 @@ civicAdmin.post('/bureaus', adminAuth(), async (c) => {
 });
 civicAdmin.put('/bureaus/:id', adminAuth(), async (c) => {
     try {
+        const adminId = c.get('user_id');
         const { id } = c.req.param();
         const data = await c.req.json();
+        // Get old values for audit
+        const oldBureauResult = await pool.query('SELECT * FROM bureaus WHERE id = $1', [id]);
+        if (oldBureauResult.rows.length === 0) {
+            return c.json({ success: false, error: 'Bureau not found' }, 404);
+        }
+        const oldBureau = oldBureauResult.rows[0];
         const bureau = await updateBureau(id, data);
         if (!bureau) {
             return c.json({ success: false, error: 'Bureau not found' }, 404);
         }
+        // Log admin action
+        await logAdminAction(adminId, null, 'UPDATE_BUREAU', 'bureau', id, oldBureau, bureau, {});
         return c.json({ success: true, data: bureau });
     }
     catch (error) {
@@ -318,8 +342,17 @@ civicAdmin.put('/bureaus/:id', adminAuth(), async (c) => {
 });
 civicAdmin.delete('/bureaus/:id', adminAuth(), async (c) => {
     try {
+        const adminId = c.get('user_id');
         const { id } = c.req.param();
+        // Get old values for audit
+        const oldBureauResult = await pool.query('SELECT * FROM bureaus WHERE id = $1', [id]);
+        if (oldBureauResult.rows.length === 0) {
+            return c.json({ success: false, error: 'Bureau not found' }, 404);
+        }
+        const oldBureau = oldBureauResult.rows[0];
         const bureau = await deleteBureau(id);
+        // Log admin action
+        await logAdminAction(adminId, null, 'DELETE_BUREAU', 'bureau', id, oldBureau, null, {});
         return c.json({ success: true, message: 'Bureau deleted' });
     }
     catch (error) {
