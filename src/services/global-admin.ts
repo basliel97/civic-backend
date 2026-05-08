@@ -79,23 +79,42 @@ export async function getGlobalAdminStatsOverview(): Promise<GlobalAdminStatsOve
 export async function getPlatformGrowthTrends() {
   const result = await pool.query(`
     WITH months AS (
-      -- Generate a list of the last 6 months
       SELECT date_trunc('month', series) as month_date
-      FROM generate_series(now() - INTERVAL '5 months', now(), '1 month') AS series
+      FROM generate_series(
+        now() - INTERVAL '2 months',
+        now() + INTERVAL '2 months',
+        INTERVAL '1 month'
+      ) AS series
     )
+
     SELECT 
       to_char(m.month_date, 'Mon YYYY') as label,
       
       -- New Citizens count per month
-      (SELECT COUNT(*) FROM "user" 
-       WHERE role = 'citizen' 
-       AND date_trunc('month', created_at) = m.month_date) as citizens,
-       
-      -- Engagement (Apps + Posts + Votes) per month
       (
-        (SELECT COUNT(*) FROM transport_applications WHERE date_trunc('month', created_at) = m.month_date) +
-        (SELECT COUNT(*) FROM posts WHERE date_trunc('month', created_at) = m.month_date) +
-        (SELECT COUNT(*) FROM poll_votes WHERE date_trunc('month', voted_at) = m.month_date)
+        SELECT COUNT(*) 
+        FROM "user"
+        WHERE role = 'citizen'
+        AND date_trunc('month', created_at) = m.month_date
+      ) as citizens,
+       
+      -- Engagement (Applications + Posts + Votes)
+      (
+        (SELECT COUNT(*) 
+         FROM transport_applications
+         WHERE date_trunc('month', created_at) = m.month_date)
+         
+        +
+        
+        (SELECT COUNT(*) 
+         FROM posts
+         WHERE date_trunc('month', created_at) = m.month_date)
+         
+        +
+        
+        (SELECT COUNT(*) 
+         FROM poll_votes
+         WHERE date_trunc('month', voted_at) = m.month_date)
       ) as interactions
       
     FROM months m
