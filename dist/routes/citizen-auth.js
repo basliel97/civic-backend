@@ -4,6 +4,7 @@ import { pool } from "../db/pool.js";
 import { citizenAuth as citizenAuthMiddleware } from "../middleware/citizen-auth.js";
 import bcrypt from "bcrypt";
 import { auth } from "../auth/index.js"; // 👈 THIS must be your configured instance
+import { uploadExternalImageToSupabase } from "../services/supabase.js";
 /**
  * Citizen Authentication Routes
  * Integrates Fayda identity verification with Better Auth
@@ -80,50 +81,64 @@ citizenAuthRoutes.post("/complete-register", async (c) => {
         if (!fin || !otp || !password) {
             return c.json({ success: false, error: "Missing required fields" }, 400);
         }
-        // 1. Verify OTP with Fayda API
+        // 1. Verify OTP with Fayda API (Now returns bilingual names and dates)
         const kycData = await FaydaService.verifyOtp(fin, otp);
-        const verifiedPhone = kycData.personalIdentity.phone;
-        // 2. Check if user exists in Better Auth
-        const existingUser = await pool.query('SELECT id FROM "user" WHERE username = $1', [fin]);
+        // 2. Proxy the image to your Supabase storage
+        const myInternalImageUrl = await uploadExternalImageToSupabase(kycData.biometrics.face, fin);
+        // 3. Check if user already exists in Postgres
+        const existingUser = await pool.query('SELECT id FROM "user" WHERE username = $1 OR fin = $1', [fin]);
         if (existingUser.rows.length > 0) {
             return c.json({ success: false, error: "User already registered" }, 409);
         }
-        // 3. Create Better Auth User
+        // 4. Create Better Auth User
         const userResult = await auth.api.signUpEmail({
-            body: { email: email || `${fin}@civic.local`, password, name: kycData.personalIdentity.fullName },
+            body: {
+                email: email || `${fin}@civic.local`,
+                password,
+                name: kycData.personalIdentity.fullName
+            },
         });
         if (!userResult || !userResult.user)
-            throw new Error("Failed to create user");
-        // 4. Update Postgres with Hierarchical Data (Mapping Fayda -> Postgres)
+            throw new Error("Failed to create user in auth system");
+        // 5. Update Postgres with all the high-fidelity ID data
         await pool.query(`UPDATE "user" SET 
-        username = $1,
-        fin = $2,
-        fan = $3,
-        phone_number = $4,
-        dob = $5,
-        dob_eth = $6,
-        gender = $7,
-        image = $8,        -- Changed from photo_url to image
-        region = $9,
-        sub_city = $10,
-        kebele = $11,
-        "email_verified" = $12,
-        status = 'active', -- Using standard status
-        "updated_at" = NOW()
-      WHERE id = $13`, [
-            fin,
-            fin,
-            kycData.personalIdentity.fan,
-            kycData.personalIdentity.phone,
-            kycData.personalIdentity.dob,
-            kycData.personalIdentity.dobEth,
-            kycData.personalIdentity.gender,
-            kycData.biometrics?.face || null, // Mapping to 'image'
-            kycData.address.region,
-            kycData.address.woreda,
-            kycData.address.kebele,
-            email ? true : false,
-            userResult.user.id,
+        username = $1, fin = $2, fan = $3, phone_number = $4,
+        name = $5, name_amh = $6, 
+        gender = $7, gender_amh = $8,
+        dob = $9, dob_eth = $10,
+        issue_date_gr = $11, issue_date_eth = $12, 
+        expiry_date_gr = $13, expiry_date_eth = $14,
+        region = $15, region_amh = $16,
+        sub_city = $17, sub_city_amh = $18,
+        kebele = $19, kebele_amh = $20,
+        serial_number = $21,
+        image = $22,
+        status = 'active',
+        updated_at = NOW()
+      WHERE id = $23`, [
+            fin, // $1: username
+            fin, // $2: fin
+            kycData.personalIdentity.fan, // $3: fan
+            kycData.personalIdentity.phone, // $4: phone_number
+            kycData.personalIdentity.fullName, // $5: name
+            kycData.personalIdentity.fullNameAmh, // $6: name_amh
+            kycData.personalIdentity.gender, // $7: gender
+            kycData.personalIdentity.genderAmh, // $8: gender_amh
+            kycData.personalIdentity.dob, // $9: dob
+            kycData.personalIdentity.dobEth, // $10: dob_eth
+            kycData.issueDateGr, // $11: issue_date_gr
+            kycData.issueDateEth, // $12: issue_date_eth
+            kycData.expiryDateGr, // $13: expiry_date_gr
+            kycData.expiryDateEth, // $14: expiry_date_eth
+            kycData.address.region, // $15: region
+            kycData.address.regionAmh, // $16: region_amh
+            kycData.address.woreda, // $17: sub_city (woreda maps to sub_city)
+            kycData.address.woredaAmh, // $18: sub_city_amh
+            kycData.address.kebele, // $19: kebele
+            kycData.address.kebeleAmh, // $20: kebele_amh
+            kycData.serialNumber, // $21: serial_number
+            myInternalImageUrl, // $22: image
+            userResult.user.id // $23: WHERE id
         ]);
         return c.json({
             success: true,
@@ -132,7 +147,7 @@ citizenAuthRoutes.post("/complete-register", async (c) => {
         });
     }
     catch (error) {
-        console.error("[Citizen Auth] Complete register error:", error);
+        console.error("[Citizen Auth] Complete register error:", error.message);
         return c.json({ success: false, error: error.message }, 500);
     }
 });
@@ -372,8 +387,17 @@ citizenAuthRoutes.post("/2fa/login-verify", async (c) => {
 citizenAuthRoutes.get("/profile", citizenAuthMiddleware(), async (c) => {
     try {
         const user_id = c.get('user_id');
-        const user = await pool.query(`SELECT id, username, email, name, role, status, fin, phone_number,
-          region, sub_city, kebele, work_type, occupation, dob, gender, image,
+        const user = await pool.query(`SELECT id, username, email, name, role, status, fin, fan, phone_number,
+          region, sub_city, kebele, work_type, occupation, dob, dob_eth, gender, image,
+           name_amh AS "nameAmh", 
+    region_amh AS "regionAmh", 
+    sub_city_amh AS "subCityAmh",
+    kebele_amh AS "kebeleAmh",
+    gender_amh AS "genderAmh",
+    issue_date_gr AS "issueDateGr",
+    issue_date_eth AS "issueDateEth",
+    expiry_date_gr AS "expiryDateGr",
+    expiry_date_eth AS "expiryDateEth",
           created_at, last_login_at, 
           two_factor_enabled AS "twoFactorEnabled" -- 🆕 ALIAS ADDED HERE
    FROM "user" WHERE id = $1`, [user_id]);

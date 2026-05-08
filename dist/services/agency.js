@@ -12,14 +12,16 @@ export async function submitApplication(data) {
     const client = await pool.connect();
     try {
         await client.query('BEGIN');
-        // Verify the service exists and is active
+        // 1. Verify the service exists and is active
         const serviceCheck = await client.query(`SELECT id, bureau_id, service_name FROM bureau_services WHERE id = $1 AND is_active = TRUE`, [data.serviceId]);
         if (serviceCheck.rows.length === 0) {
             throw new Error('Invalid or inactive service');
         }
+        // 2. Insert application with all 6 dynamic fields
+        // Ensure 'form_responses' column exists in your 'transport_applications' table
         const result = await client.query(`INSERT INTO transport_applications
-        (user_id, service_id, service_type, delivery_method, external_references, documents, application_status, payment_status, delivery_status)
-       VALUES ($1, $2, 'dynamic', $3, $4, $5, 'submitted', 'pending', 'pending')
+        (user_id, service_id, service_type, delivery_method, external_references, documents, form_responses, application_status, payment_status, delivery_status)
+       VALUES ($1, $2, 'dynamic', $3, $4, $5, $6, 'submitted', 'pending', 'pending')
        RETURNING *`, [
             data.userId,
             data.serviceId,
@@ -29,10 +31,17 @@ export async function submitApplication(data) {
             JSON.stringify(data.formResponses || {})
         ]);
         const application = result.rows[0];
-        // Audit Log
+        // 3. Audit Log
         await client.query(`INSERT INTO application_audit_logs (application_id, new_status, action_notes)
-       VALUES ($1, 'submitted', 'Citizen submitted application with documents')`, [application.id]);
-        await notifyBureauStaff(serviceCheck.rows[0].bureau_id, { title: 'New Application', message: 'A new request has been submitted.', type: 'info', screen: '/application/', targetId: application.id });
+       VALUES ($1, 'submitted', 'Citizen submitted application with documents and form data')`, [application.id]);
+        // 4. Notify Staff
+        await notifyBureauStaff(serviceCheck.rows[0].bureau_id, {
+            title: 'New Application',
+            message: `New request for ${serviceCheck.rows[0].service_name} submitted.`,
+            type: 'info',
+            screen: '/application/',
+            targetId: application.id
+        });
         await client.query('COMMIT');
         return application;
     }
