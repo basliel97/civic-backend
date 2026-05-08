@@ -14,7 +14,6 @@ export interface GlobalAdminStatsDetailed {
   citizensByRegion: Record<string, number>;
   citizensByWorkType: Record<string, number>;
   citizensByGender: Record<string, number>;
-  citizensByVerificationStatus: Record<string, number>;
   citizensByActivityLevel: Record<string, number>;
   adminsByBureau: Record<string, number>;
   pollsByStatus: Record<string, number>;
@@ -152,12 +151,8 @@ export async function getGlobalAdminStatsDetailed(): Promise<GlobalAdminStatsDet
   );
 
   // Citizens by verification status (email_verified)
-  const citizensByVerificationResult = await pool.query(
-    "SELECT email_verified, COUNT(*) as count FROM \"user\" WHERE role = 'citizen' AND deleted_at IS NULL GROUP BY email_verified"
-  );
-  const citizensByVerificationStatus = Object.fromEntries(
-    citizensByVerificationResult.rows.map(row => [row.email_verified ? 'verified' : 'unverified', parseInt(row.count)])
-  );
+  
+  
 
   // Citizens by activity level (based on last_login_at, e.g., active within 30 days)
  const citizensByActivityResult = await pool.query(
@@ -220,7 +215,6 @@ const citizensByActivityLevel = Object.fromEntries(
     citizensByRegion,
     citizensByWorkType,
     citizensByGender,
-    citizensByVerificationStatus,
     citizensByActivityLevel,
     adminsByBureau,
     pollsByStatus,
