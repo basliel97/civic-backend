@@ -235,7 +235,10 @@ agencyManagement.get('/bureaus/:bureauId/admins', adminAuth(), globalSuperAdminA
 // 3. UPDATE a Bureau SuperAdmin
 agencyManagement.put('/bureaus/:bureauId/superadmins/:id', adminAuth(), globalSuperAdminAuth(), async (c) => {
     try {
+<<<<<<< HEAD
         const adminId = c.get('user_id');
+=======
+>>>>>>> ac036362bb0ba0a772985656690ef3b8da0d99b0
         const { bureauId, id } = c.req.param();
         const { name, status } = await c.req.json();
         // Validate bureau exists
@@ -244,11 +247,18 @@ agencyManagement.put('/bureaus/:bureauId/superadmins/:id', adminAuth(), globalSu
             return c.json({ success: false, error: 'Bureau not found' }, 404);
         }
         // Ensure target user exists, is a super_admin, and belongs to this bureau
+<<<<<<< HEAD
         const userCheck = await pool.query('SELECT id, name, status as old_status FROM "user" WHERE id = $1 AND bureau_id = $2 AND role = $3 AND deleted_at IS NULL', [id, bureauId, 'super_admin']);
         if (userCheck.rows.length === 0) {
             return c.json({ success: false, error: 'Superadmin not found in this bureau' }, 404);
         }
         const oldUser = userCheck.rows[0];
+=======
+        const userCheck = await pool.query('SELECT id FROM "user" WHERE id = $1 AND bureau_id = $2 AND role = $3 AND deleted_at IS NULL', [id, bureauId, 'super_admin']);
+        if (userCheck.rows.length === 0) {
+            return c.json({ success: false, error: 'Superadmin not found in this bureau' }, 404);
+        }
+>>>>>>> ac036362bb0ba0a772985656690ef3b8da0d99b0
         // Update only provided fields
         const result = await pool.query(`UPDATE "user" 
        SET name = COALESCE($1, name), 
@@ -259,8 +269,11 @@ agencyManagement.put('/bureaus/:bureauId/superadmins/:id', adminAuth(), globalSu
         if (result.rows.length === 0) {
             return c.json({ success: false, error: 'Failed to update superadmin' }, 500);
         }
+<<<<<<< HEAD
         // Log admin action
         await logAdminAction(adminId, bureauId, 'update_superadmin', 'user', id, oldUser, result.rows[0], { fields_updated: [name ? 'name' : null, status ? 'status' : null].filter(Boolean) });
+=======
+>>>>>>> ac036362bb0ba0a772985656690ef3b8da0d99b0
         return c.json({ success: true, data: result.rows[0] });
     }
     catch (error) {
@@ -271,19 +284,31 @@ agencyManagement.put('/bureaus/:bureauId/superadmins/:id', adminAuth(), globalSu
 // 4. DELETE a Bureau SuperAdmin (soft delete)
 agencyManagement.delete('/bureaus/:bureauId/superadmins/:id', adminAuth(), globalSuperAdminAuth(), async (c) => {
     try {
+<<<<<<< HEAD
         const adminId = c.get('user_id');
         const { bureauId, id } = c.req.param();
+=======
+        const { bureauId, id } = c.req.param();
+        const adminId = c.get('user_id');
+>>>>>>> ac036362bb0ba0a772985656690ef3b8da0d99b0
         // Validate bureau exists
         const bureauCheck = await pool.query('SELECT id FROM bureaus WHERE id = $1 AND status = $2', [bureauId, 'active']);
         if (bureauCheck.rows.length === 0) {
             return c.json({ success: false, error: 'Bureau not found' }, 404);
         }
         // Ensure target user exists, is a super_admin, and belongs to this bureau
+<<<<<<< HEAD
         const userCheck = await pool.query('SELECT id, name, email FROM "user" WHERE id = $1 AND bureau_id = $2 AND role = $3 AND deleted_at IS NULL', [id, bureauId, 'super_admin']);
         if (userCheck.rows.length === 0) {
             return c.json({ success: false, error: 'Superadmin not found in this bureau' }, 404);
         }
         const oldUser = userCheck.rows[0];
+=======
+        const userCheck = await pool.query('SELECT id FROM "user" WHERE id = $1 AND bureau_id = $2 AND role = $3 AND deleted_at IS NULL', [id, bureauId, 'super_admin']);
+        if (userCheck.rows.length === 0) {
+            return c.json({ success: false, error: 'Superadmin not found in this bureau' }, 404);
+        }
+>>>>>>> ac036362bb0ba0a772985656690ef3b8da0d99b0
         // Prevent self-deletion
         if (id === adminId) {
             return c.json({ success: false, error: 'You cannot delete your own account' }, 400);
@@ -296,8 +321,11 @@ agencyManagement.delete('/bureaus/:bureauId/superadmins/:id', adminAuth(), globa
         if (result.rows.length === 0) {
             return c.json({ success: false, error: 'Superadmin not found' }, 404);
         }
+<<<<<<< HEAD
         // Log admin action
         await logAdminAction(adminId, bureauId, 'delete_superadmin', 'user', id, oldUser, { ...oldUser, status: 'deleted', deleted_by: adminId }, { reason: 'superadmin_removed' });
+=======
+>>>>>>> ac036362bb0ba0a772985656690ef3b8da0d99b0
         return c.json({ success: true, message: 'Superadmin deleted successfully', data: result.rows[0] });
     }
     catch (error) {
