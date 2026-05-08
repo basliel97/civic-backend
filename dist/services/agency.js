@@ -1,4 +1,5 @@
 import { pool } from '../db/pool.js';
+import { FulfillmentRegistry } from '../logic/fulfillment.js';
 // ============================================================================
 // 1. CITIZEN FUNCTIONS (Used by the Mobile App)
 // ============================================================================
@@ -24,12 +25,14 @@ export async function submitApplication(data) {
             data.serviceId,
             data.deliveryMethod || 'pickup',
             JSON.stringify(data.externalReferences || {}),
-            JSON.stringify(data.documents || [])
+            JSON.stringify(data.documents || []),
+            JSON.stringify(data.formResponses || {})
         ]);
         const application = result.rows[0];
         // Audit Log
         await client.query(`INSERT INTO application_audit_logs (application_id, new_status, action_notes)
        VALUES ($1, 'submitted', 'Citizen submitted application with documents')`, [application.id]);
+        await notifyBureauStaff(serviceCheck.rows[0].bureau_id, { title: 'New Application', message: 'A new request has been submitted.', type: 'info', screen: '/application/', targetId: application.id });
         await client.query('COMMIT');
         return application;
     }
@@ -58,6 +61,11 @@ export async function processMockPayment(applicationId, userId) {
         // Audit Log for the payment
         await client.query(`INSERT INTO application_audit_logs (application_id, old_status, new_status, action_notes)
        VALUES ($1, 'pending_payment', 'paid', $2)`, [applicationId, `Payment confirmed. Reference: ${mockRef}`]);
+        // Fetch bureau_id for notification
+        const appResult = await client.query(`SELECT bs.bureau_id FROM transport_applications ta
+       JOIN bureau_services bs ON ta.service_id = bs.id
+       WHERE ta.id = $1`, [applicationId]);
+        await notifyBureauStaff(appResult.rows[0].bureau_id, { title: 'Payment Confirmed', message: 'Citizen has completed payment for App #' + applicationId.slice(0, 8), type: 'success', screen: '/application/', targetId: applicationId });
         await client.query('COMMIT');
         return updated.rows[0];
     }
@@ -139,7 +147,8 @@ export async function getAdminApplicationById(applicationId, bureauId) {
     return result.rows[0] || null;
 }
 export async function getPublicBureauServices(bureauId) {
-    const result = await pool.query(`SELECT id, service_name, service_description, base_fee, required_docs
+    const result = await pool.query(`SELECT id, service_name, service_description, base_fee, required_docs, form_schema,    -- 🆕 ADD THIS
+        automation_tag
      FROM bureau_services
      WHERE bureau_id = $1 AND is_active = TRUE
      ORDER BY service_name ASC`, [bureauId]);
@@ -209,18 +218,24 @@ export async function getApplicationsByService(bureauId, serviceType, status) {
  * This makes the logic generic for other agency types (Health, Education, etc.)
  */
 export async function reviewApplication(applicationId, adminId, updates) {
-    const client = await pool.connect(); // This now gets a client from the SHARED pool
+    const client = await pool.connect();
     try {
         await client.query('BEGIN');
-        // 1. Explicitly name the columns to avoid having two "id" fields in the result
-        const appResult = await client.query(`SELECT ta.id AS app_id, ta.user_id, ta.application_status, bs.service_name
+        // 1. FIXED: Added "OF ta" to the FOR UPDATE clause
+        // This locks the Application but allows the JOIN to function correctly
+        const appResult = await client.query(`SELECT 
+        ta.id, 
+        ta.user_id, 
+        ta.application_status, 
+        ta.form_responses, 
+        bs.automation_tag
        FROM transport_applications ta
-       LEFT JOIN bureau_services bs ON ta.service_id = bs.id
-       WHERE ta.id = $1 FOR UPDATE`, [applicationId]);
+       INNER JOIN bureau_services bs ON ta.service_id = bs.id 
+       WHERE ta.id = $1 FOR UPDATE OF ta`, [applicationId]);
         if (appResult.rows.length === 0)
             throw new Error('Application not found');
         const app = appResult.rows[0];
-        // 2. Use the full table name in the WHERE clause of the UPDATE
+        // 2. Update the Application Record
         const updated = await client.query(`UPDATE transport_applications
        SET application_status = COALESCE($1, application_status),
            delivery_status = COALESCE($2, delivery_status),
@@ -228,28 +243,50 @@ export async function reviewApplication(applicationId, adminId, updates) {
            delivery_tracking_number = $4,
            assigned_admin_id = $5,
            updated_at = NOW()
-       WHERE transport_applications.id = $6 
-       RETURNING *`, [updates.appStatus, updates.deliveryStatus, updates.notes || null, updates.tracking || null, adminId, applicationId]);
-        // 3. Log using the explicit ID
+       WHERE id = $6 RETURNING *`, [
+            updates.appStatus,
+            updates.deliveryStatus,
+            updates.notes || null,
+            updates.tracking || null,
+            adminId,
+            applicationId
+        ]);
+        // 3. Log the change to the Audit Log
         await client.query(`INSERT INTO application_audit_logs (application_id, changed_by, old_status, new_status, action_notes)
-       VALUES ($1, $2, $3, $4, $5)`, [applicationId, adminId, app.application_status, updates.appStatus || app.application_status, updates.notes || 'Admin updated status']);
-        // 4. License Issuance (Generic Check)
-        const serviceName = app.service_name || '';
-        if (updates.appStatus === 'approved' && serviceName.toLowerCase().includes('driver license')) {
-            const licenseNo = `DL-${Math.floor(1000000 + Math.random() * 9000000)}`;
-            await client.query(`INSERT INTO driver_licenses (user_id, license_number, categories, issue_date, expiry_date, status)
-         VALUES ($1, $2, $3, NOW(), NOW() + INTERVAL '2 years', 'active')
-         ON CONFLICT DO NOTHING`, [app.user_id, licenseNo, JSON.stringify(["Grade 1"])]);
+       VALUES ($1, $2, $3, $4, $5)`, [
+            applicationId,
+            adminId,
+            app.application_status,
+            updates.appStatus || app.application_status,
+            updates.notes || 'Admin updated status'
+        ]);
+        // 4. AUTOMATED FULFILLMENT
+        // Check if the new status is 'approved' (Case-insensitive for safety)
+        if (updates.appStatus?.toLowerCase() === 'approved') {
+            const tag = app.automation_tag;
+            const responses = app.form_responses;
+            if (tag && FulfillmentRegistry[tag]) {
+                console.log(`[Fulfillment] 🚀 Executing automated logic for tag: ${tag}`);
+                await FulfillmentRegistry[tag](app.user_id, applicationId, responses);
+            }
+            else {
+                console.log(`[Fulfillment] ℹ️ No automated logic defined for tag: ${tag}`);
+            }
+            await notifyUser(app.user_id, { title: 'Application Approved', message: 'Your request has been approved and finalized.', type: 'success', screen: '/application/', targetId: applicationId });
+        }
+        else if (updates.appStatus?.toLowerCase() === 'rejected') {
+            await notifyUser(app.user_id, { title: 'Application Rejected', message: 'Your request was not approved. Please check the officer notes.', type: 'danger', screen: '/application/', targetId: applicationId });
         }
         await client.query('COMMIT');
         return updated.rows[0];
     }
     catch (error) {
-        await client.query('ROLLBACK'); // CRITICAL: This releases the lock so the next request doesn't timeout
+        await client.query('ROLLBACK');
+        console.error('[reviewApplication Error]:', error);
         throw error;
     }
     finally {
-        client.release(); // CRITICAL: This puts the connection back in the pool
+        client.release();
     }
 }
 export async function addApplicationComment(appId, authorId, role, text) {
@@ -261,6 +298,17 @@ export async function addApplicationComment(appId, authorId, role, text) {
        VALUES ($1, $2, $3, $4) RETURNING *`, [appId, authorId, role, text]);
         // Update the main application's "updated_at" timestamp
         await client.query(`UPDATE transport_applications SET updated_at = NOW() WHERE id = $1`, [appId]);
+        // Fetch app details for notification
+        const appDetails = await client.query(`SELECT ta.user_id, bs.bureau_id FROM transport_applications ta
+       JOIN bureau_services bs ON ta.service_id = bs.id
+       WHERE ta.id = $1`, [appId]);
+        const app = appDetails.rows[0];
+        if (role === 'admin') {
+            await notifyUser(app.user_id, { title: 'New Message', message: 'An officer sent a message regarding your application.', type: 'info', screen: '/application/chat/', targetId: appId });
+        }
+        else if (role === 'citizen') {
+            await notifyBureauStaff(app.bureau_id, { title: 'Citizen Message', message: 'The applicant sent a new message.', type: 'info', screen: '/application/chat/', targetId: appId });
+        }
         await client.query('COMMIT');
         return commentResult.rows[0];
     }
@@ -722,36 +770,44 @@ export async function deleteAnnouncement(id, bureauId, adminId) {
  * Get active announcements for citizens (public endpoint)
  * Returns global announcements + bureau-specific announcements if bureauId is provided
  */
-export async function getActiveAnnouncements(bureauId, limit = 10) {
+export async function getActiveAnnouncements(filters, limit = 20) {
     let query = `
     SELECT
-      id,
-      title,
-      content,
-      image_url,
-      bureau_id,
-      target_role,
-      created_at
-    FROM announcements
-    WHERE is_active = TRUE
+      a.id,
+      a.title,
+      a.content,
+      a.image_url,
+      a.bureau_id,
+      a.created_at,
+      b.name as bureau_name -- 🆕 JOIN to get the Agency Name for the UI
+    FROM announcements a
+    LEFT JOIN bureaus b ON a.bureau_id = b.id
+    WHERE a.is_active = TRUE
   `;
     const params = [];
-    if (bureauId) {
-        // Include both global and bureau-specific announcements
-        params.push(bureauId);
-        query += ` AND (bureau_id IS NULL OR bureau_id = $${params.length})`;
+    // 🆕 Professional Logic:
+    if (filters.type === 'global') {
+        query += ` AND a.bureau_id IS NULL`;
     }
-    else {
-        // Only global announcements
-        query += ` AND bureau_id IS NULL`;
+    else if (filters.type === 'bureau' && filters.bureauId) {
+        params.push(filters.bureauId);
+        query += ` AND a.bureau_id = $${params.length}`;
     }
-    query += ` ORDER BY created_at DESC LIMIT $${params.length + 1}`;
+    else if (filters.type === 'all') {
+        // Don't add extra filters, just get everything active
+    }
+    else if (filters.bureauId) {
+        // Keep your original "Mixed" logic if just an ID is passed
+        params.push(filters.bureauId);
+        query += ` AND (a.bureau_id IS NULL OR a.bureau_id = $${params.length})`;
+    }
+    query += ` ORDER BY a.created_at DESC LIMIT $${params.length + 1}`;
     params.push(limit);
     const result = await pool.query(query, params);
     return result.rows;
 }
 export async function getSystemAnnouncements() {
-    return await getActiveAnnouncements(undefined, 5);
+    return await getActiveAnnouncements({ type: 'all' }, 5);
 }
 /**
  * 🔔 USER NOTIFICATIONS (Activity)
@@ -760,16 +816,18 @@ export async function getSystemAnnouncements() {
  */
 export async function getUserActivityLogs(userId) {
     const result = await pool.query(`SELECT 
-        log.id, 
-        log.new_status, 
-        log.action_notes as title, 
-        log.created_at,
-        ta.service_type
-     FROM application_audit_logs log
-     JOIN transport_applications ta ON log.application_id = ta.id
-     WHERE ta.user_id = $1
-     ORDER BY log.created_at DESC 
-     LIMIT 10`, [userId]);
+        id, 
+        title, 
+        message, 
+        type, 
+        is_read AS "isRead", 
+        target_screen AS "targetScreen", 
+        target_id AS "targetId", 
+        created_at
+     FROM notifications 
+     WHERE user_id = $1
+     ORDER BY created_at DESC 
+     LIMIT 20`, [userId]);
     return result.rows;
 }
 /**
@@ -804,6 +862,49 @@ export async function updateApplicationByCitizen(appId, userId, data) {
     }
 }
 /**
+ * 🪪 ONBOARD SINGLE LICENSE
+ * Used for manual entry from the Admin Dashboard
+ */
+export async function onboardLicense(adminId, bureauId, data) {
+    const { citizenFin, licenseNumber, categories, expiryDate, issueDate } = data;
+    // 1. Verify the Citizen exists in our system via their FIN
+    const userCheck = await pool.query('SELECT id, name FROM "user" WHERE username = $1', [citizenFin]);
+    if (userCheck.rows.length === 0) {
+        throw new Error(`Citizen with FIN ${citizenFin} is not registered in the Digital Portal yet.`);
+    }
+    const userId = userCheck.rows[0].id;
+    // 2. Insert the License
+    const result = await pool.query(`INSERT INTO driver_licenses (user_id, license_number, categories, issue_date, expiry_date, status)
+     VALUES ($1, $2, $3, $4, $5, 'active')
+     RETURNING *`, [userId, licenseNumber, JSON.stringify(categories), issueDate || 'NOW()', expiryDate]);
+    // 3. Log the action
+    await logAdminAction(adminId, bureauId, 'ONBOARD_LICENSE', 'driver_license', result.rows[0].id, null, data);
+    return { license: result.rows[0], citizenName: userCheck.rows[0].name };
+}
+/**
+ * 📊 BULK IMPORT LICENSES
+ * Simulates an Excel/CSV upload
+ */
+export async function bulkImportLicenses(adminId, bureauId, records) {
+    const results = { success: 0, failed: 0, errors: [] };
+    for (const record of records) {
+        try {
+            await onboardLicense(adminId, bureauId, record);
+            results.success++;
+        }
+        catch (err) {
+            results.failed++;
+            results.errors.push(`Row ${results.success + results.failed}: ${err.message}`);
+        }
+    }
+    // Log the bulk operation
+    await logAdminAction(adminId, bureauId, 'BULK_IMPORT_LICENSES', 'driver_license', 'multiple', null, {
+        total: records.length,
+        success: results.success
+    });
+    return results;
+}
+/**
  * CITIZEN ACTION: Withdraw/Cancel Application
  * Soft deletes the application so it stays in history but stops being active.
  */
@@ -814,6 +915,95 @@ export async function cancelApplicationByCitizen(appId, userId) {
         throw new Error('Cannot cancel: Government has already finalized this request.');
     }
     return await pool.query(`UPDATE transport_applications SET application_status = 'cancelled', updated_at = NOW() WHERE id = $1 RETURNING *`, [appId]);
+}
+/**
+ * ⚖️ LEGAL ELIGIBILITY ENGINE
+ * This function determines if a citizen is allowed to apply for a specific service.
+ */
+export async function checkServiceEligibility(userId, serviceId) {
+    // 1. Get the service details
+    const serviceRes = await pool.query('SELECT service_name, automation_tag FROM bureau_services WHERE id = $1', [serviceId]);
+    if (serviceRes.rows.length === 0)
+        throw new Error("Service not found");
+    const service = serviceRes.rows[0];
+    const tag = service.automation_tag;
+    // 2. Get the citizen's current license record
+    const licenseRes = await pool.query('SELECT * FROM driver_licenses WHERE user_id = $1', [userId]);
+    const license = licenseRes.rows[0];
+    // 3. DEFINE THE RULES
+    const today = new Date();
+    switch (tag) {
+        case 'driver_license_renewal':
+            if (!license)
+                return { eligible: false, reason: 'no_license', message: 'No license record found. This service is for existing drivers only.' };
+            const expiry = new Date(license.expiry_date);
+            const daysUntilExpiry = Math.ceil((expiry.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
+            // Rule: Can only renew if expired or expiring in less than 30 days
+            if (daysUntilExpiry > 30) {
+                return {
+                    eligible: false,
+                    reason: 'not_expired',
+                    message: `Your license is still valid. Renewal opens 30 days before expiry (Date: ${license.expiry_date}).`
+                };
+            }
+            return { eligible: true };
+        case 'driver_license_replacement':
+        case 'driver_license_international':
+            if (!license)
+                return { eligible: false, reason: 'no_license', message: 'Active license required for this service.' };
+            if (license.status !== 'active')
+                return { eligible: false, reason: 'suspended', message: 'This service is unavailable while your license is suspended or revoked.' };
+            const isExpired = new Date(license.expiry_date) < today;
+            if (isExpired)
+                return { eligible: false, reason: 'expired', message: 'Your license is expired. Please use the Renewal service first.' };
+            return { eligible: true };
+        case 'lift_suspension':
+            if (!license || license.status !== 'suspended') {
+                return { eligible: false, reason: 'not_suspended', message: 'Our records show your license is not currently suspended.' };
+            }
+            return { eligible: true };
+        case 'driver_info_request':
+            // Everyone who has a license can request their info
+            if (!license)
+                return { eligible: false, reason: 'no_license', message: 'No driver record found.' };
+            return { eligible: true };
+        default:
+            // For services with no specific preconditions (like training info)
+            return { eligible: true,
+                formSchema: serviceRes.rows[0].form_schema
+            };
+    }
+}
+export async function notifyUser(userId, data) {
+    return await pool.query(`INSERT INTO notifications (user_id, title, message, type, target_screen, target_id)
+     VALUES ($1, $2, $3, $4, $5, $6)`, [userId, data.title, data.message, data.type || 'info', data.screen, data.targetId]);
+}
+// 2. Notify all Staff in a specific Bureau
+export async function notifyBureauStaff(bureauId, data) {
+    // Find all admins/super_admins for this bureau
+    const staff = await pool.query('SELECT id FROM "user" WHERE bureau_id = $1 AND role IN (\'admin\', \'super_admin\')', [bureauId]);
+    // Create a notification for every staff member found
+    const promises = staff.rows.map(member => notifyUser(member.id, data));
+    return Promise.all(promises);
+}
+export async function notifyGlobalAdmins(data) {
+    // Find only Super Admins who manage the whole platform
+    const globalAdmins = await pool.query('SELECT id FROM "user" WHERE role = \'super_admin\' AND bureau_id IS NULL');
+    const promises = globalAdmins.rows.map(admin => notifyUser(admin.id, data));
+    return Promise.all(promises);
+}
+export async function notifyTargetedCitizens(criteria, data) {
+    const { regions, work_types } = criteria;
+    let query = 'SELECT id FROM "user" WHERE role = \'citizen\' AND status = \'active\'';
+    const params = [];
+    // Filter by region if specified
+    if (regions && regions.length > 0) {
+        query += ` AND region = ANY($1)`;
+        params.push(regions);
+    }
+    const citizens = await pool.query(query, params);
+    const promises = citizens.rows.map(c => notifyUser(c.id, data));
+    return Promise.all(promises);
 }
 export async function cancelApplication(applicationId, adminId, reason) {
     const client = await pool.connect();

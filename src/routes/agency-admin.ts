@@ -25,8 +25,15 @@ import {
   updateAnnouncement,
   deleteAnnouncement,
   getCombinedAuditLogs,
-  logAdminAction
+  logAdminAction,
+  bulkImportLicenses,
+  onboardLicense
 } from '../services/agency.js';
+import { 
+  getSuggestions,     // Existing function for listing
+  getSuggestionById,  // Existing function for details
+  respondToSuggestion // The function you just showed me
+} from '../services/suggestion.js';
 
 import bcrypt from "bcrypt";
 
@@ -716,6 +723,147 @@ agencyAdmin.post('/change-password', async (c) => {
       success: true, 
       message: "Password changed successfully" 
     });
+  } catch (error: any) {
+    return c.json({ success: false, error: error.message }, 500);
+  }
+});
+
+/**
+ * POST /api/admin/agency/licenses/onboard
+ * Manual entry for a single license
+ */
+agencyAdmin.post('/licenses/onboard', async (c) => {
+  try {
+    const adminId = c.get('user_id');
+    const bureauId = c.get('bureauId');
+    const body = await c.req.json();
+
+    const result = await onboardLicense(adminId, bureauId!, body);
+    return c.json({ success: true, data: result });
+  } catch (error: any) {
+    return c.json({ success: false, error: error.message }, 400);
+  }
+});
+
+/**
+ * POST /api/admin/agency/licenses/import
+ * Bulk import from Excel (sent as JSON array from frontend)
+ */
+agencyAdmin.post('/licenses/import', async (c) => {
+  try {
+    const adminId = c.get('user_id');
+    const bureauId = c.get('bureauId');
+    const { records } = await c.req.json(); // Expects { records: [...] }
+
+    if (!Array.isArray(records)) {
+      return c.json({ success: false, error: "Invalid data format. Expected an array of records." }, 400);
+    }
+
+    const report = await bulkImportLicenses(adminId, bureauId!, records);
+    return c.json({ success: true, data: report });
+  } catch (error: any) {
+    return c.json({ success: false, error: error.message }, 500);
+  }
+});
+
+agencyAdmin.get('/suggestions', async (c) => {
+  try {
+    const bureauId = c.get('bureauId'); // Get the ID of the Admin's Bureau from token
+    const status = c.req.query('status'); // Optional filter (submitted/resolved)
+    
+    if (!bureauId) return c.json({ success: false, error: "Bureau ID not found" }, 403);
+
+    // Use your existing 'getSuggestions' function
+    const result = await getSuggestions(bureauId, status);
+    
+    return c.json({ success: true, data: result });
+  } catch (error: any) {
+    return c.json({ success: false, error: error.message }, 500);
+  }
+});
+
+// B. Get Suggestion Details
+// URL: GET /api/admin/agency/suggestions/:id
+agencyAdmin.get('/suggestions/:id', async (c) => {
+  try {
+    const { id } = c.req.param();
+    const bureauId = c.get('bureauId');
+
+    const suggestion = await getSuggestionById(id);
+
+    if (!suggestion) return c.json({ success: false, error: "Not found" }, 404);
+
+    // 🛡️ Security: Ensure this admin is allowed to see this suggestion
+    if (suggestion.bureau_id !== bureauId) {
+      return c.json({ success: false, error: "Access Denied: Different Bureau" }, 403);
+    }
+
+    return c.json({ success: true, data: suggestion });
+  } catch (error: any) {
+    return c.json({ success: false, error: error.message }, 500);
+  }
+});
+
+// C. Respond to a Suggestion
+// URL: POST /api/admin/agency/suggestions/:id/respond
+agencyAdmin.post('/suggestions/:id/respond', async (c) => {
+  try {
+    const { id } = c.req.param();
+    const adminId = c.get('user_id'); // Who is replying
+    const { response } = await c.req.json();
+
+    if (!response) {
+      return c.json({ success: false, error: "Response text is required" }, 400);
+    }
+
+    // Use the function you already have!
+    const updated = await respondToSuggestion(id, adminId, response);
+    
+    return c.json({ 
+      success: true, 
+      message: "Reply sent to citizen", 
+      data: updated 
+    });
+  } catch (error: any) {
+    return c.json({ success: false, error: error.message }, 500);
+  }
+});
+
+agencyAdmin.get('/notifications', async (c) => {
+  try {
+    const adminId = c.get('user_id');
+    const result = await pool.query(
+      `SELECT * FROM notifications 
+       WHERE user_id = $1 
+       ORDER BY created_at DESC LIMIT 50`, 
+      [adminId]
+    );
+    
+    // Also calculate the unread count for the dashboard badge
+    const unreadCount = result.rows.filter(n => !n.is_read).length;
+
+    return c.json({ 
+      success: true, 
+      unreadCount,
+      data: result.rows 
+    });
+  } catch (error: any) {
+    return c.json({ success: false, error: error.message }, 500);
+  }
+});
+
+// 2. Mark a notification as read
+agencyAdmin.post('/notifications/:id/read', async (c) => {
+  try {
+    const { id } = c.req.param();
+    const adminId = c.get('user_id');
+
+    await pool.query(
+      'UPDATE notifications SET is_read = TRUE WHERE id = $1 AND user_id = $2', 
+      [id, adminId]
+    );
+    
+    return c.json({ success: true });
   } catch (error: any) {
     return c.json({ success: false, error: error.message }, 500);
   }

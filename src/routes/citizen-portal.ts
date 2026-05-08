@@ -14,8 +14,12 @@ import {
   cancelApplicationByCitizen,
   getUserActivityLogs,
   getActiveAnnouncements,
-  deleteApplicationByCitizen
+  deleteApplicationByCitizen,
+  checkServiceEligibility,
+  notifyGlobalAdmins
 } from '../services/agency.js';
+import { getBureaus, createSuggestion, getMySuggestions } from '../services/suggestion.js';
+
 
 const citizenPortal = new Hono<{ Variables: CitizenAuthContext }>();
 
@@ -57,16 +61,31 @@ citizenPortal.post('/apply', citizenAuth(), async (c) => {
   try {
     const userId = c.get('user_id');
     const body = await c.req.json();
+    const { serviceId } = body;
 
+    // 🛡️ SECURITY CHECK: The Final Gatekeeper
+    // We call the SAME function we used for the GET check
+    const eligibility = await checkServiceEligibility(userId, serviceId);
+    
+    if (!eligibility.eligible) {
+      return c.json({ 
+        success: false, 
+        error: "Security Violation: You are not eligible for this service.",
+        message: eligibility.message 
+      }, 403);
+    }
+
+    // 🚀 If they pass the check, THEN create the application
     const application = await submitApplication({
       userId,
-      serviceId: body.serviceId,
+      serviceId,
       deliveryMethod: body.deliveryMethod,
       externalReferences: body.externalReferences,
-      documents: body.documents
+      documents: body.documents,
+      formResponses: body.formResponses
     });
 
-    return c.json({ success: true, message: 'Application submitted', data: application }, 201);
+    return c.json({ success: true, data: application }, 201);
   } catch (error: any) {
     return c.json({ success: false, error: error.message }, 500);
   }
@@ -205,20 +224,100 @@ citizenPortal.get('/notifications', citizenAuth(), async (c) => {
 // 9. Get System Announcements (Public News)
 citizenPortal.get('/announcements', async (c) => {
   try {
-    // For citizens, get bureau-specific announcements if they have a bureau, otherwise global only
-    const userId = c.get('user_id');
-    let bureauId: string | undefined;
+    const bureauId = c.req.query('bureauId');
+    const typeQuery = c.req.query('type') as 'all' | 'global' | 'bureau' | undefined;
 
-    if (userId) {
-      // Get user's bureau if they have one
-      const userResult = await pool.query('SELECT bureau_id FROM "user" WHERE id = $1', [userId]);
-      bureauId = userResult.rows[0]?.bureau_id;
+    // 🆕 THE FIX: Construct the filter object instead of passing a string
+    const filters = {
+      bureauId: bureauId,
+      // If no type is provided, default to 'all' if they are on the news feed, 
+      // or 'global' if you prefer. Let's use 'all' for the full feed.
+      type: typeQuery || (bureauId ? 'bureau' : 'all') 
+    };
+
+    const news = await getActiveAnnouncements(filters, 20);
+    
+    return c.json({ success: true, data: news });
+  } catch (error: any) {
+    console.error('[Portal News] Error:', error.message);
+    return c.json({ success: false, error: error.message }, 500);
+  }
+});
+
+// 10. Check Eligibility (Called before showing the application form)
+citizenPortal.get('/check-eligibility/:serviceId', citizenAuth(), async (c) => {
+  try {
+    const userId = c.get('user_id');
+    const { serviceId } = c.req.param();
+    
+    const result = await checkServiceEligibility(userId, serviceId);
+    
+    return c.json({ 
+      success: true, 
+      eligible: result.eligible,
+      reason: result.reason,
+      message: result.message
+    });
+  } catch (error: any) {
+    return c.json({ success: false, error: error.message }, 500);
+  }
+});
+
+citizenPortal.get('/bureaus', async (c) => {
+  try {
+    const bureaus = await getBureaus();
+    return c.json({ success: true, data: bureaus });
+  } catch (error: any) {
+    return c.json({ success: false, error: error.message }, 500);
+  }
+});
+
+// 2. Submit a private suggestion
+// src/routes/citizen-portal.ts
+
+citizenPortal.post('/suggestions', citizenAuth(), async (c) => {
+  try {
+    const user_id = c.get('user_id');
+    const { bureau_id, subject, content } = await c.req.json();
+    
+    // 🆕 FIXED: Only check for subject and content. 
+    // bureau_id is now OPTIONAL (can be null for General feedback)
+    if (!subject || !content) {
+      return c.json({ success: false, error: 'Subject and content are required' }, 400);
+    }
+    
+    // Call the service (it will now pass null to the DB correctly)
+    const suggestion = await createSuggestion(user_id, bureau_id, subject, content);
+
+    if (!bureau_id) {
+      await notifyGlobalAdmins({ title: 'System Feedback', message: 'A citizen sent feedback about the portal platform.', type: 'info', screen: 'general_feedback', targetId: suggestion.id });
     }
 
-    const limit = parseInt(c.req.query('limit') || '10');
+    return c.json({ success: true, data: suggestion }, 201);
+  } catch (error: any) {
+    console.error("[Suggestions] Error:", error.message);
+    return c.json({ success: false, error: error.message }, 500);
+  }
+});
 
-    const news = await getActiveAnnouncements(bureauId, limit);
-    return c.json({ success: true, data: news });
+// 3. Get my suggestion history
+// src/routes/citizen-portal.ts
+
+citizenPortal.get('/suggestions/my', citizenAuth(), async (c) => {
+  try {
+    const user_id = c.get('user_id');
+    const query = c.req.query();
+    const page = parseInt(query.page || '1');
+    const limit = Math.min(parseInt(query.limit || '20'), 50);
+    
+    // getMySuggestions already returns an object: { suggestions: [], total: X, ... }
+    const result = await getMySuggestions(user_id, page, limit);
+    
+    // 🚀 Return 'result' directly as 'data'
+    return c.json({ 
+      success: true, 
+      data: result 
+    });
   } catch (error: any) {
     return c.json({ success: false, error: error.message }, 500);
   }
@@ -233,6 +332,36 @@ citizenPortal.delete('/applications/:id', citizenAuth(), async (c) => {
   } catch (error: any) {
     return c.json({ success: false, error: error.message }, 400);
   }
+});
+
+citizenPortal.get('/notifications', citizenAuth(), async (c) => {
+  try {
+    const userId = c.get('user_id');
+    const res = await pool.query(
+      `SELECT 
+        id, 
+        title, 
+        message, 
+        type, 
+        is_read AS "isRead",        -- 🆕 ALIAS FOR UI
+        target_screen AS "targetScreen", -- 🆕 ALIAS FOR UI
+        target_id AS "targetId",      -- 🆕 ALIAS FOR UI
+        created_at 
+      FROM notifications 
+      WHERE user_id = $1 
+      ORDER BY created_at DESC LIMIT 50`, 
+      [userId]
+    );
+    return c.json({ success: true, data: res.rows });
+  } catch (error: any) {
+    return c.json({ success: false, error: error.message }, 500);
+  }
+});
+
+citizenPortal.post('/notifications/:id/read', citizenAuth(), async (c) => {
+  const { id } = c.req.param();
+  await pool.query('UPDATE notifications SET is_read = TRUE WHERE id = $1', [id]);
+  return c.json({ success: true });
 });
 
 export default citizenPortal;

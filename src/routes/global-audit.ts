@@ -6,6 +6,7 @@ import {
   getGlobalSecurityLogs
 } from '../services/global-audit.js';
 import { getPlatformGrowthTrends } from '../services/global-admin.js';
+import { pool } from '../db/pool.js';
 
 const globalAuditRoutes = new Hono<{ Variables: AuthContext }>();
 
@@ -58,5 +59,26 @@ globalAuditRoutes.get('/stats/growth', async (c) => {
   } catch (error: any) {
     return c.json({ success: false, error: error.message }, 500);
   }
+});
+
+globalAuditRoutes.get('/notifications', async (c) => {
+  try {
+    const adminId = c.get('user_id');
+    const result = await pool.query(
+      'SELECT * FROM notifications WHERE user_id = $1 ORDER BY created_at DESC LIMIT 50', 
+      [adminId]
+    );
+    return c.json({ success: true, data: result.rows });
+  } catch (error: any) {
+    return c.json({ success: false, error: error.message }, 500);
+  }
+});
+
+// Mark system alert as read
+globalAuditRoutes.post('/notifications/:id/read', async (c) => {
+  const { id } = c.req.param();
+  const adminId = c.get('user_id');
+  await pool.query('UPDATE notifications SET is_read = TRUE WHERE id = $1 AND user_id = $2', [id, adminId]);
+  return c.json({ success: true });
 });
 export default globalAuditRoutes;

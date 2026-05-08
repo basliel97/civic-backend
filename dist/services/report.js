@@ -1,4 +1,5 @@
 import { pool } from '../db/pool.js';
+import { notifyUser } from './agency.js';
 export async function createReport(itemId, itemType, itemTitle, user_id, reason, description) {
     const result = await pool.query(`INSERT INTO reports (item_id, item_type, item_title, user_id, reason, description)
      VALUES ($1, $2, $3, $4, $5, $6) RETURNING *`, [itemId, itemType, itemTitle, user_id, reason, description || null]);
@@ -40,11 +41,39 @@ export async function getReportById(id) {
 export async function resolveReport(id, resolvedBy, resolution) {
     const result = await pool.query(`UPDATE reports SET status = 'resolved', resolved_by = $1, resolution = $2, resolved_at = NOW()
      WHERE id = $3 RETURNING *`, [resolvedBy, resolution, id]);
-    return result.rows[0];
+    const report = result.rows[0];
+    // Notify the reporter
+    try {
+        await notifyUser(report.user_id, {
+            title: 'Report Resolved',
+            message: `Your report has been resolved: ${resolution}`,
+            type: 'success',
+            screen: 'report_detail',
+            targetId: report.id
+        });
+    }
+    catch (error) {
+        console.error('Failed to notify reporter for resolved report:', report.id, error);
+    }
+    return report;
 }
 export async function rejectReport(id) {
     const result = await pool.query(`UPDATE reports SET status = 'rejected' WHERE id = $1 RETURNING *`, [id]);
-    return result.rows[0];
+    const report = result.rows[0];
+    // Notify the reporter
+    try {
+        await notifyUser(report.user_id, {
+            title: 'Report Rejected',
+            message: 'Your report has been reviewed and rejected.',
+            type: 'warning',
+            screen: 'report_detail',
+            targetId: report.id
+        });
+    }
+    catch (error) {
+        console.error('Failed to notify reporter for rejected report:', report.id, error);
+    }
+    return report;
 }
 export async function getUserReports(user_id) {
     const result = await pool.query(`SELECT * FROM reports WHERE user_id = $1 ORDER BY created_at DESC`, [user_id]);

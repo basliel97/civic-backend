@@ -1,4 +1,5 @@
 import { pool } from '../db/pool.js';
+import { notifyUser } from './agency.js';
 
 export async function getBureaus() {
   const result = await pool.query(
@@ -60,22 +61,30 @@ export async function createSuggestion(user_id: string, bureauId: string, subjec
   return result.rows[0];
 }
 
-export async function getMySuggestions(user_id: string, page = 1, limit = 20) {
+export async function getMySuggestions(userId: string, page = 1, limit = 20) {
   const offset = (page - 1) * limit;
   
   const result = await pool.query(
-    `SELECT s.*, b.name as bureau_name
+    `SELECT 
+        s.id, 
+        s.subject, 
+        s.content, 
+        s.status, 
+        s.response, 
+        s.responded_at, 
+        s.created_at, 
+        b.name as bureau_name -- This will be NULL for General Feedback
      FROM suggestions s
-     JOIN bureaus b ON s.bureau_id = b.id
+     LEFT JOIN bureaus b ON s.bureau_id = b.id -- 👈 CRITICAL: Changed to LEFT JOIN
      WHERE s.user_id = $1
      ORDER BY s.created_at DESC
      LIMIT $2 OFFSET $3`,
-    [user_id, limit, offset]
+    [userId, limit, offset]
   );
   
   const countResult = await pool.query(
     'SELECT COUNT(*) FROM suggestions WHERE user_id = $1',
-    [user_id]
+    [userId]
   );
   
   return {
@@ -147,6 +156,9 @@ export async function respondToSuggestion(id: string, respondedBy: string, respo
      WHERE id = $3 RETURNING *`,
     [response, respondedBy, id]
   );
+
+  await notifyUser(result.rows[0].user_id, { title: 'Feedback Answered', message: 'A government officer has replied to your suggestion.', type: 'success', screen: '/suggestions/history' });
+
   return result.rows[0];
 }
 
@@ -157,3 +169,27 @@ export async function updateSuggestionStatus(id: string, status: string) {
   );
   return result.rows[0];
 }
+
+export async function getSuggestionsForBureau(bureauId: string, status?: string) {
+  let query = `
+    SELECT 
+        s.*, 
+        u.name as citizen_name, 
+        u.username as citizen_fin 
+    FROM suggestions s
+    JOIN "user" u ON s.user_id = u.id
+    WHERE s.bureau_id = $1
+  `;
+  const params: any[] = [bureauId];
+
+  if (status) {
+    query += ` AND s.status = $2`;
+    params.push(status);
+  }
+
+  query += ` ORDER BY s.created_at DESC`;
+  const result = await pool.query(query, params);
+  return result.rows;
+}
+
+

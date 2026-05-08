@@ -1,5 +1,6 @@
 import { pool } from '../db/pool.js';
 import { checkProfanity, stripHtmlTags } from './profanity.js';
+import { notifyGlobalAdmins, notifyUser } from './agency.js';
 
 export interface Forum {
   id: string;
@@ -120,33 +121,41 @@ export async function deleteForum(id: string) {
   return result.rows[0];
 }
 
+// src/services/forum.ts
+
 export async function getPostsInForum(forumId: string, page = 1, limit = 50, currentUserId?: string) {
   const offset = (page - 1) * limit;
   
-  // We use subqueries to count likes and check if the current user liked it
+  // 1. Fetch the list of posts with casting to INT for counts
   const result = await pool.query(
     `SELECT p.*, u.name as user_name, f.name as forum_name,
-       (SELECT COUNT(*) FROM likes WHERE post_id = p.id) as like_count,
+       (SELECT COUNT(*) FROM likes WHERE post_id = p.id)::INT as like_count,
+       p.reply_count::INT as reply_count,
+       p.view_count::INT as view_count,
        EXISTS(SELECT 1 FROM likes WHERE post_id = p.id AND user_id = $4) as is_liked
      FROM posts p
      JOIN "user" u ON p.user_id = u.id
      JOIN forums f ON p.forum_id = f.id
      WHERE p.forum_id = $1 AND p.status = 'active'
      ORDER BY p.is_pinned DESC, p.created_at DESC
-     LIMIT $2 OFFSET $3`,[forumId, limit, offset, currentUserId || '00000000-0000-0000-0000-000000000000']
+     LIMIT $2 OFFSET $3`,
+    [forumId, limit, offset, currentUserId || '00000000-0000-0000-0000-000000000000']
   );
   
+  // 2. 🆕 THE MISSING PART: Fetch the total count for pagination
   const countResult = await pool.query(
-    'SELECT COUNT(*) FROM posts WHERE forum_id = $1 AND status = $2',
+    'SELECT COUNT(*)::INT as count FROM posts WHERE forum_id = $1 AND status = $2',
     [forumId, 'active']
   );
   
+  const total = countResult.rows[0].count;
+  
   return {
     posts: result.rows,
-    total: parseInt(countResult.rows[0].count),
+    total: total,
     page,
     limit,
-    totalPages: Math.ceil(parseInt(countResult.rows[0].count) / limit)
+    totalPages: Math.ceil(total / limit)
   };
 }
 
@@ -198,11 +207,28 @@ export async function createPost(forumId: string, user_id: string, title: string
   
   // Ensure image_url is saved
   const result = await pool.query(
-    `INSERT INTO posts (forum_id, user_id, title, content, image_url) 
+    `INSERT INTO posts (forum_id, user_id, title, content, image_url)
      VALUES ($1, $2, $3, $4, $5) RETURNING *`,[forumId, user_id, title, content, imageUrl || null]
   );
-  
-  return result.rows[0];
+
+  const post = result.rows[0];
+
+  // Notify global admins for moderation
+  try {
+    const forumResult = await pool.query('SELECT name FROM forums WHERE id = $1', [forumId]);
+    const forumName = forumResult.rows[0]?.name || 'Unknown Forum';
+    await notifyGlobalAdmins({
+      title: 'New Forum Post',
+      message: 'A user posted in ' + forumName,
+      type: 'info',
+      screen: 'moderation_view',
+      targetId: post.id
+    });
+  } catch (error) {
+    console.error('Failed to notify global admins for post:', post.id, error);
+  }
+
+  return post;
 }
 
 
@@ -311,7 +337,27 @@ export async function createReply(postId: string, user_id: string, content: stri
     );
 
     await client.query('COMMIT');
-    return result.rows[0];
+
+    const reply = result.rows[0];
+
+    // Notify original post creator
+    try {
+      const postResult = await pool.query('SELECT user_id FROM posts WHERE id = $1', [postId]);
+      const originalCreatorId = postResult.rows[0]?.user_id;
+      if (originalCreatorId && originalCreatorId !== user_id) { // Don't notify self
+        await notifyUser(originalCreatorId, {
+          title: 'New Reply',
+          message: 'Someone replied to your discussion.',
+          type: 'info',
+          screen: '/community/post/',
+          targetId: postId
+        });
+      }
+    } catch (error) {
+      console.error('Failed to notify post creator for reply:', reply.id, error);
+    }
+
+    return reply;
   } catch (e) {
     await client.query('ROLLBACK');
     throw e;

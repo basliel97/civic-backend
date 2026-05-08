@@ -4,6 +4,7 @@ import { getForums, getForumById, getPostsInForum, getPostById, createPost, upda
 import { getPolls, getPollById, votePoll, getPollResults } from '../services/poll.js';
 import { createReport } from '../services/report.js';
 import { getBureaus, createSuggestion, getMySuggestions } from '../services/suggestion.js';
+import { notifyGlobalAdmins } from '../services/agency.js';
 
 const civic = new Hono<{ Variables: CitizenAuthContext }>();
 
@@ -218,34 +219,25 @@ civic.delete('/replies/:id', citizenAuth(), async (c) => {
   }
 });
 
-civic.get('/polls', async (c) => {
+// GET /api/polls
+// This single route handles everything by identifying the user first
+civic.get('/polls', citizenAuth(), async (c) => {
   try {
-    const polls = await getPolls();
+    const category = c.req.query('category'); // 🆕 Catch category from URL
+    const polls = await getPolls(
+      c.get('user_id'), 
+      c.get('userRegion'), 
+      c.get('userGender'), 
+      c.get('userWorkType'),
+      category
+    );
     return c.json({ success: true, data: polls });
   } catch (error: any) {
-    console.error('[Polls] List error:', error);
     return c.json({ success: false, error: error.message }, 500);
   }
 });
 
-civic.get('/polls/:id', citizenAuth(), async (c) => {
-  try {
-    const { id } = c.req.param();
-    const user_id = c.get('user_id');
-    
-    const poll = await getPollById(id, user_id);
-    
-    if (!poll) {
-      return c.json({ success: false, error: 'Poll not found' }, 404);
-    }
-    
-    return c.json({ success: true, data: poll });
-  } catch (error: any) {
-    console.error('[Polls] Get error:', error);
-    return c.json({ success: false, error: error.message }, 500);
-  }
-});
-
+// Vote in a poll (Strict check)
 civic.post('/polls/:id/vote', citizenAuth(), async (c) => {
   try {
     const { id } = c.req.param();
@@ -255,56 +247,68 @@ civic.post('/polls/:id/vote', citizenAuth(), async (c) => {
     const userWorkType = c.get('userWorkType');
     const { option_index } = await c.req.json();
     
-    if (option_index === undefined) {
-      return c.json({ success: false, error: 'option_index is required' }, 400);
-    }
-    
     const vote = await votePoll(id, user_id, option_index, userRegion, userGender, userWorkType);
     return c.json({ success: true, data: vote });
   } catch (error: any) {
-    if (error.code === 'ALREADY_VOTED') {
-      return c.json({ success: false, error: error.message }, 409);
-    }
-    if (error.code === 'NOT_TARGETED') {
-      return c.json({ success: false, error: error.message }, 403);
-    }
-    if (error.code === 'VOTE_REQUIRED') {
-      return c.json({ success: false, error: error.message }, 403);
-    }
-    console.error('[Polls] Vote error:', error);
-    return c.json({ success: false, error: error.message }, 500);
+    return c.json({ success: false, error: error.message, code: error.code }, 403);
   }
 });
 
+// Get Live Results
 civic.get('/polls/:id/results', citizenAuth(), async (c) => {
   try {
     const { id } = c.req.param();
     const user_id = c.get('user_id');
-    
     const results = await getPollResults(id, user_id);
     return c.json({ success: true, data: results });
   } catch (error: any) {
-    if (error.code === 'VOTE_REQUIRED') {
-      return c.json({ success: false, error: error.message }, 403);
-    }
-    console.error('[Polls] Results error:', error);
-    return c.json({ success: false, error: error.message }, 500);
+    return c.json({ success: false, error: error.message }, 403);
   }
 });
+
 
 civic.post('/reports', citizenAuth(), async (c) => {
   try {
     const user_id = c.get('user_id');
-    const { item_id, item_type, item_title, reason, description } = await c.req.json();
-    
-    if (!item_id || !item_type || !reason) {
+    const body = await c.req.json();
+
+    // 🆕 THE MAPPING FIX: 
+    // This looks for both camelCase (Mobile) and snake_case (Web/DB)
+    const itemId = body.itemId || body.item_id;
+    const itemType = body.itemType || body.item_type;
+    const reason = body.reason;
+    const description = body.description || '';
+    const itemTitle = body.itemTitle || body.item_title || 'Reported Content';
+
+    // 1. Validation check
+    if (!itemId || !itemType || !reason) {
+      console.error("🚩 [Report Error] Missing required fields:", { itemId, itemType, reason });
       return c.json({ success: false, error: 'item_id, item_type, and reason are required' }, 400);
     }
-    
-    const report = await createReport(item_id, item_type, item_title || '', user_id, reason, description);
-    return c.json({ success: true, data: report }, 201);
+
+    console.log(`🚩 [Report Alert] User ${user_id} is reporting a ${itemType}. ID: ${itemId}`);
+
+    // 2. Call your existing service
+    // Ensure createReport is imported from ../services/report.js
+    const report = await createReport(
+      itemId,
+      itemType,
+      itemTitle,
+      user_id,
+      reason,
+      description
+    );
+
+    await notifyGlobalAdmins({ title: 'New Content Report', message: 'A user has flagged a forum post for moderation.', type: 'danger', screen: 'reports_list', targetId: report.id });
+
+    return c.json({
+      success: true,
+      message: "Report submitted successfully",
+      data: report
+    }, 201);
+
   } catch (error: any) {
-    console.error('[Reports] Create error:', error);
+    console.error('❌ [Backend Report Error]:', error.message);
     return c.json({ success: false, error: error.message }, 500);
   }
 });
@@ -319,37 +323,6 @@ civic.get('/bureaus', async (c) => {
   }
 });
 
-civic.post('/suggestions', citizenAuth(), async (c) => {
-  try {
-    const user_id = c.get('user_id');
-    const { bureau_id, subject, content } = await c.req.json();
-    
-    if (!bureau_id || !subject || !content) {
-      return c.json({ success: false, error: 'bureau_id, subject, and content are required' }, 400);
-    }
-    
-    const suggestion = await createSuggestion(user_id, bureau_id, subject, content);
-    return c.json({ success: true, data: suggestion }, 201);
-  } catch (error: any) {
-    console.error('[Suggestions] Create error:', error);
-    return c.json({ success: false, error: error.message }, 500);
-  }
-});
-
-civic.get('/suggestions/my', citizenAuth(), async (c) => {
-  try {
-    const user_id = c.get('user_id');
-    const query = c.req.query();
-    const page = parseInt(query.page || '1');
-    const limit = Math.min(parseInt(query.limit || '20'), 50);
-    
-    const result = await getMySuggestions(user_id, page, limit);
-    return c.json({ success: true, data: result });
-  } catch (error: any) {
-    console.error('[Suggestions] List error:', error);
-    return c.json({ success: false, error: error.message }, 500);
-  }
-});
 
 civic.post('/posts/:id/like', citizenAuth(), async (c) => {
   try {

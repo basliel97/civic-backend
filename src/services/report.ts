@@ -1,4 +1,5 @@
 import { pool } from '../db/pool.js';
+import { notifyUser } from './agency.js';
 
 export async function createReport(
   itemId: string,
@@ -67,7 +68,22 @@ export async function resolveReport(id: string, resolvedBy: string, resolution: 
      WHERE id = $3 RETURNING *`,
     [resolvedBy, resolution, id]
   );
-  return result.rows[0];
+  const report = result.rows[0];
+
+  // Notify the reporter
+  try {
+    await notifyUser(report.user_id, {
+      title: 'Report Resolved',
+      message: `Your report has been resolved: ${resolution}`,
+      type: 'success',
+      screen: 'report_detail',
+      targetId: report.id
+    });
+  } catch (error) {
+    console.error('Failed to notify reporter for resolved report:', report.id, error);
+  }
+
+  return report;
 }
 
 export async function rejectReport(id: string) {
@@ -75,7 +91,22 @@ export async function rejectReport(id: string) {
     `UPDATE reports SET status = 'rejected' WHERE id = $1 RETURNING *`,
     [id]
   );
-  return result.rows[0];
+  const report = result.rows[0];
+
+  // Notify the reporter
+  try {
+    await notifyUser(report.user_id, {
+      title: 'Report Rejected',
+      message: 'Your report has been reviewed and rejected.',
+      type: 'warning',
+      screen: 'report_detail',
+      targetId: report.id
+    });
+  } catch (error) {
+    console.error('Failed to notify reporter for rejected report:', report.id, error);
+  }
+
+  return report;
 }
 
 export async function getUserReports(user_id: string) {
