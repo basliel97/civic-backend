@@ -160,16 +160,22 @@ export async function getGlobalAdminStatsDetailed(): Promise<GlobalAdminStatsDet
   );
 
   // Citizens by activity level (based on last_login_at, e.g., active within 30 days)
-  const thirtyDaysAgo = new Date();
-  thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
-  const citizensByActivityResult = await pool.query(
-    "SELECT CASE WHEN last_login_at >= $1 THEN 'active' ELSE 'inactive' END as activity, COUNT(*) as count FROM \"user\" WHERE role = 'citizen' AND deleted_at IS NULL GROUP BY activity",
-    [thirtyDaysAgo.toISOString()]
-  );
-  const citizensByActivityLevel = Object.fromEntries(
-    citizensByActivityResult.rows.map(row => [row.activity, parseInt(row.count)])
-  );
+ const citizensByActivityResult = await pool.query(
+  `SELECT 
+     status as activity, 
+     COUNT(*) as count 
+   FROM "user" 
+   WHERE role = 'citizen' 
+     AND deleted_at IS NULL 
+   GROUP BY status`
+);
 
+const citizensByActivityLevel = Object.fromEntries(
+  citizensByActivityResult.rows.map(row => [
+    row.activity,
+    parseInt(row.count)
+  ])
+);
   // Admins by bureau
   const adminsByBureauResult = await pool.query(
     "SELECT b.name as bureau_name, COUNT(u.id) as count FROM \"user\" u LEFT JOIN bureaus b ON u.bureau_id = b.id WHERE u.role IN ('admin', 'super_admin') AND u.deleted_at IS NULL GROUP BY b.name"
