@@ -976,6 +976,7 @@ export interface AnnouncementData {
   content: string;
   image_url?: string;
   target_role?: string;
+  is_active?: boolean;
 }
 
 /**
@@ -1090,6 +1091,11 @@ export async function updateAnnouncement(id: string, bureauId: string | null, ad
   if (data.target_role !== undefined) {
     updates.push(`target_role = $${paramCount++}`);
     values.push(data.target_role);
+  }
+  // ✅ ADD THIS BLOCK - to allow updating is_active
+  if (data.is_active !== undefined) {
+    updates.push(`is_active = $${paramCount++}`);
+    values.push(data.is_active);
   }
 
   if (updates.length === 0) {
