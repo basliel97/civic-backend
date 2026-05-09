@@ -325,27 +325,15 @@ export async function getApplicationsByService(bureauId: string | null | undefin
 export async function reviewApplication(
   applicationId: string,
   adminId: string,
-  updates: { 
-    appStatus?: string, 
-    deliveryStatus?: string, 
-    notes?: string, 
-    tracking?: string 
-  }
+  updates: { appStatus?: string, deliveryStatus?: string, notes?: string, tracking?: string }
 ) {
   const client = await pool.connect();
   
   try {
     await client.query('BEGIN');
 
-    // 1. FIXED: Added "OF ta" to the FOR UPDATE clause
-    // This locks the Application but allows the JOIN to function correctly
     const appResult = await client.query(
-      `SELECT 
-        ta.id, 
-        ta.user_id, 
-        ta.application_status, 
-        ta.form_responses, 
-        bs.automation_tag
+      `SELECT ta.id, ta.user_id, ta.application_status, ta.form_responses, bs.automation_tag
        FROM transport_applications ta
        INNER JOIN bureau_services bs ON ta.service_id = bs.id 
        WHERE ta.id = $1 FOR UPDATE OF ta`, 
@@ -355,7 +343,6 @@ export async function reviewApplication(
     if (appResult.rows.length === 0) throw new Error('Application not found');
     const app = appResult.rows[0];
 
-    // 2. Update the Application Record
     const updated = await client.query(
       `UPDATE transport_applications
        SET application_status = COALESCE($1, application_status),
@@ -364,46 +351,24 @@ export async function reviewApplication(
            delivery_tracking_number = $4,
            assigned_admin_id = $5,
            updated_at = NOW()
-       WHERE id = $6 RETURNING *`, 
-      [
-        updates.appStatus, 
-        updates.deliveryStatus, 
-        updates.notes || null, 
-        updates.tracking || null, 
-        adminId, 
-        applicationId
-      ]
+       WHERE id = $6 RETURNING *`,[updates.appStatus, updates.deliveryStatus, updates.notes || null, updates.tracking || null, adminId, applicationId]
     );
 
-    // 3. Log the change to the Audit Log
     await client.query(
       `INSERT INTO application_audit_logs (application_id, changed_by, old_status, new_status, action_notes)
-       VALUES ($1, $2, $3, $4, $5)`,
-      [
-        applicationId, 
-        adminId, 
-        app.application_status, 
-        updates.appStatus || app.application_status, 
-        updates.notes || 'Admin updated status'
-      ]
+       VALUES ($1, $2, $3, $4, $5)`,[applicationId, adminId, app.application_status, updates.appStatus || app.application_status, updates.notes || 'Admin updated status']
     );
 
-    // 4. AUTOMATED FULFILLMENT
-    // Check if the new status is 'approved' (Case-insensitive for safety)
     if (updates.appStatus?.toLowerCase() === 'approved') {
       const tag = app.automation_tag;
       const responses = app.form_responses;
 
       if (tag && FulfillmentRegistry[tag]) {
-        console.log(`[Fulfillment] 🚀 Executing automated logic for tag: ${tag}`);
-        await FulfillmentRegistry[tag](app.user_id, applicationId, responses);
-      } else {
-        console.log(`[Fulfillment] ℹ️ No automated logic defined for tag: ${tag}`);
+        // PASS THE CLIENT HERE
+        await FulfillmentRegistry[tag](client, app.user_id, applicationId, responses);
       }
 
-      await notifyUser(app.user_id, { title: 'Application Approved', message: 'Your request has been approved and finalized.', type: 'success', screen: '/application/', targetId: applicationId });
-    } else if (updates.appStatus?.toLowerCase() === 'rejected') {
-      await notifyUser(app.user_id, { title: 'Application Rejected', message: 'Your request was not approved. Please check the officer notes.', type: 'danger', screen: '/application/', targetId: applicationId });
+      await notifyUser(app.user_id, { title: 'Application Approved', message: 'Your request has been approved.', type: 'success', screen: '/application/', targetId: applicationId });
     }
 
     await client.query('COMMIT');
@@ -411,7 +376,6 @@ export async function reviewApplication(
 
   } catch (error) {
     await client.query('ROLLBACK'); 
-    console.error('[reviewApplication Error]:', error);
     throw error;
   } finally {
     client.release(); 
