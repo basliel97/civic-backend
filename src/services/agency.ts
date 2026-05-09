@@ -1331,6 +1331,36 @@ export async function cancelApplicationByCitizen(appId: string, userId: string) 
  * ⚖️ LEGAL ELIGIBILITY ENGINE
  * This function determines if a citizen is allowed to apply for a specific service.
  */
+// Helper function to check for pending applications
+async function checkPendingApplication(userId: string, serviceId: string) {
+  try {
+    const result = await pool.query(
+      `SELECT id, application_status, created_at
+       FROM transport_applications
+       WHERE user_id = $1 AND service_id = $2
+       AND application_status NOT IN ('approved', 'rejected', 'cancelled', 'completed')
+       ORDER BY created_at DESC
+       LIMIT 1`,
+      [userId, serviceId]
+    );
+
+    return {
+      hasPending: result.rows.length > 0,
+      pendingApp: result.rows[0] || null
+    };
+  } catch (error) {
+    console.error('Error in checkPendingApplication:', error);
+    // Return false on error to avoid blocking legitimate applications
+    return {
+      hasPending: false,
+      pendingApp: null
+    };
+  }
+}
+
+// Services excluded from pending application prevention (empty for universal protection)
+const PENDING_APPLICATION_EXCLUSIONS: string[] = [];
+
 export async function checkServiceEligibility(userId: string, serviceId: string) {
   // 1. Get the service details
   const serviceRes = await pool.query(
@@ -1341,7 +1371,26 @@ export async function checkServiceEligibility(userId: string, serviceId: string)
   const service = serviceRes.rows[0];
   const tag = service.automation_tag;
 
-  // 2. Get the citizen's current license record
+  // 2. UNIVERSAL PENDING APPLICATION PREVENTION (apply to ALL services except exclusions)
+  // Only run if we successfully got the service details
+  if (!PENDING_APPLICATION_EXCLUSIONS.includes(tag)) {
+    try {
+      const pendingCheck = await checkPendingApplication(userId, serviceId);
+      if (pendingCheck.hasPending) {
+        return {
+          eligible: false,
+          reason: 'pending_application_exists',
+          message: `You have a pending application for this service (Application #${pendingCheck.pendingApp.id}). Please wait for it to be processed before applying again.`
+        };
+      }
+    } catch (error) {
+      console.error('Error in pending application check:', error);
+      // Log the error but continue with normal eligibility check
+      // Don't fail the entire eligibility check due to pending check issues
+    }
+  }
+
+  // 3. Get the citizen's current license record
   const licenseRes = await pool.query(
     'SELECT * FROM driver_licenses WHERE user_id = $1',
     [userId]
