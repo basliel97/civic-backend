@@ -676,7 +676,7 @@ export async function getBureauServices(bureauId: string) {
 
 export async function getBureauStaff(bureauId: string) {
   const result = await pool.query(
-    'SELECT id, name, email, role, last_login_at FROM "user" WHERE bureau_id = $1 AND role = $2 AND deleted_at IS NULL',
+    'SELECT id, name, email, role, status, last_login_at FROM "user" WHERE bureau_id = $1 AND role = $2 AND deleted_at IS NULL',
     [bureauId, 'admin']
   );
   return result.rows;
