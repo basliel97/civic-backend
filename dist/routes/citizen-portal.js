@@ -1,7 +1,7 @@
 import { Hono } from 'hono';
 import { citizenAuth } from '../middleware/citizen-auth.js';
 import { pool } from '../db/pool.js';
-import { verifyExternalRecord, submitApplication, processMockPayment, getCitizenApplications, getLicenseInfo, addApplicationComment, getApplicationComments, getPublicBureauServices, updateApplicationByCitizen, cancelApplicationByCitizen, getUserActivityLogs, getActiveAnnouncements, deleteApplicationByCitizen, checkServiceEligibility, notifyGlobalAdmins } from '../services/agency.js';
+import { verifyExternalRecord, submitApplication, processMockPayment, getCitizenApplications, getLicenseInfo, addApplicationComment, getApplicationComments, getPublicBureauServices, updateApplicationByCitizen, cancelApplicationByCitizen, getUserActivityLogs, getActiveAnnouncements, deleteApplicationByCitizen, checkServiceEligibility, notifyGlobalAdmins, getCitizenCertificates, getCitizenCertificateById, getDriverLicenseWithCertificates } from '../services/agency.js';
 import { getBureaus, createSuggestion, getMySuggestions } from '../services/suggestion.js';
 const citizenPortal = new Hono();
 /**
@@ -91,11 +91,57 @@ citizenPortal.get('/my-applications', citizenAuth(), async (c) => {
 citizenPortal.get('/my-license', citizenAuth(), async (c) => {
     try {
         const userId = c.get('user_id');
-        const license = await getLicenseInfo(userId);
-        if (!license) {
+        const licenseData = await getDriverLicenseWithCertificates(userId);
+        if (!licenseData) {
             return c.json({ success: false, error: 'No active license found' }, 404);
         }
-        return c.json({ success: true, data: license });
+        return c.json({ success: true, data: licenseData });
+    }
+    catch (error) {
+        return c.json({ success: false, error: error.message }, 500);
+    }
+});
+/**
+ * 📄 CERTIFICATES & DOCUMENTS
+ */
+// 6. My Certificates
+citizenPortal.get('/my-certificates', citizenAuth(), async (c) => {
+    try {
+        const userId = c.get('user_id');
+        const certificates = await getCitizenCertificates(userId);
+        return c.json({ success: true, data: certificates });
+    }
+    catch (error) {
+        return c.json({ success: false, error: error.message }, 500);
+    }
+});
+// 7. Get Specific Certificate
+citizenPortal.get('/my-certificates/:id', citizenAuth(), async (c) => {
+    try {
+        const { id } = c.req.param();
+        const userId = c.get('user_id');
+        const certificate = await getCitizenCertificateById(userId, id);
+        if (!certificate) {
+            return c.json({ success: false, error: 'Certificate not found' }, 404);
+        }
+        return c.json({ success: true, data: certificate });
+    }
+    catch (error) {
+        return c.json({ success: false, error: error.message }, 500);
+    }
+});
+/**
+ * 🚗 DRIVING TESTS & SCHEDULING
+ */
+// 8. Get My Scheduled Tests
+citizenPortal.get('/my-tests', citizenAuth(), async (c) => {
+    try {
+        const userId = c.get('user_id');
+        const result = await pool.query(`SELECT id, test_type, scheduled_date, status, office_location, created_at, updated_at
+       FROM test_records
+       WHERE user_id = $1
+       ORDER BY scheduled_date DESC`, [userId]);
+        return c.json({ success: true, data: result.rows });
     }
     catch (error) {
         return c.json({ success: false, error: error.message }, 500);
@@ -104,7 +150,7 @@ citizenPortal.get('/my-license', citizenAuth(), async (c) => {
 /**
  * 💬 COMMUNICATION SYSTEM
  */
-// 6. Post a Comment
+// 9. Post a Comment
 citizenPortal.post('/:id/comments', citizenAuth(), async (c) => {
     try {
         const { id } = c.req.param();

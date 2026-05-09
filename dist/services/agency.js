@@ -109,6 +109,48 @@ export async function getLicenseInfo(userId) {
     const result = await pool.query(`SELECT * FROM driver_licenses WHERE user_id = $1 AND status = 'active' LIMIT 1`, [userId]);
     return result.rows[0] || null;
 }
+export async function getDriverLicenseWithCertificates(userId) {
+    // Get the license info
+    const license = await getLicenseInfo(userId);
+    if (!license) {
+        return null;
+    }
+    // Get related certificates (driver transcript and international verification)
+    const certificatesResult = await pool.query(`SELECT * FROM certificates
+     WHERE user_id = $1 AND certificate_type IN ('driver_transcript', 'international_verification')
+     ORDER BY created_at DESC`, [userId]);
+    return {
+        license,
+        certificates: certificatesResult.rows
+    };
+}
+export async function getCitizenCertificates(userId) {
+    const result = await pool.query(`SELECT
+        c.*,
+        bs.service_name,
+        bs.bureau_id,
+        b.name as bureau_name
+     FROM certificates c
+     LEFT JOIN transport_applications ta ON c.application_id = ta.id
+     LEFT JOIN bureau_services bs ON ta.service_id = bs.id
+     LEFT JOIN bureaus b ON bs.bureau_id = b.id
+     WHERE c.user_id = $1
+     ORDER BY c.created_at DESC`, [userId]);
+    return result.rows;
+}
+export async function getCitizenCertificateById(userId, certificateId) {
+    const result = await pool.query(`SELECT
+        c.*,
+        bs.service_name,
+        bs.bureau_id,
+        b.name as bureau_name
+     FROM certificates c
+     LEFT JOIN transport_applications ta ON c.application_id = ta.id
+     LEFT JOIN bureau_services bs ON ta.service_id = bs.id
+     LEFT JOIN bureaus b ON bs.bureau_id = b.id
+     WHERE c.id = $1 AND c.user_id = $2`, [certificateId, userId]);
+    return result.rows[0] || null;
+}
 export async function getAdminApplications(filters) {
     let query = `
     SELECT
@@ -230,21 +272,13 @@ export async function reviewApplication(applicationId, adminId, updates) {
     const client = await pool.connect();
     try {
         await client.query('BEGIN');
-        // 1. FIXED: Added "OF ta" to the FOR UPDATE clause
-        // This locks the Application but allows the JOIN to function correctly
-        const appResult = await client.query(`SELECT 
-        ta.id, 
-        ta.user_id, 
-        ta.application_status, 
-        ta.form_responses, 
-        bs.automation_tag
+        const appResult = await client.query(`SELECT ta.id, ta.user_id, ta.application_status, ta.form_responses, bs.automation_tag
        FROM transport_applications ta
        INNER JOIN bureau_services bs ON ta.service_id = bs.id 
        WHERE ta.id = $1 FOR UPDATE OF ta`, [applicationId]);
         if (appResult.rows.length === 0)
             throw new Error('Application not found');
         const app = appResult.rows[0];
-        // 2. Update the Application Record
         const updated = await client.query(`UPDATE transport_applications
        SET application_status = COALESCE($1, application_status),
            delivery_status = COALESCE($2, delivery_status),
@@ -252,46 +286,23 @@ export async function reviewApplication(applicationId, adminId, updates) {
            delivery_tracking_number = $4,
            assigned_admin_id = $5,
            updated_at = NOW()
-       WHERE id = $6 RETURNING *`, [
-            updates.appStatus,
-            updates.deliveryStatus,
-            updates.notes || null,
-            updates.tracking || null,
-            adminId,
-            applicationId
-        ]);
-        // 3. Log the change to the Audit Log
+       WHERE id = $6 RETURNING *`, [updates.appStatus, updates.deliveryStatus, updates.notes || null, updates.tracking || null, adminId, applicationId]);
         await client.query(`INSERT INTO application_audit_logs (application_id, changed_by, old_status, new_status, action_notes)
-       VALUES ($1, $2, $3, $4, $5)`, [
-            applicationId,
-            adminId,
-            app.application_status,
-            updates.appStatus || app.application_status,
-            updates.notes || 'Admin updated status'
-        ]);
-        // 4. AUTOMATED FULFILLMENT
-        // Check if the new status is 'approved' (Case-insensitive for safety)
+       VALUES ($1, $2, $3, $4, $5)`, [applicationId, adminId, app.application_status, updates.appStatus || app.application_status, updates.notes || 'Admin updated status']);
         if (updates.appStatus?.toLowerCase() === 'approved') {
             const tag = app.automation_tag;
             const responses = app.form_responses;
             if (tag && FulfillmentRegistry[tag]) {
-                console.log(`[Fulfillment] 🚀 Executing automated logic for tag: ${tag}`);
-                await FulfillmentRegistry[tag](app.user_id, applicationId, responses);
+                // PASS THE CLIENT HERE
+                await FulfillmentRegistry[tag](client, app.user_id, applicationId, responses);
             }
-            else {
-                console.log(`[Fulfillment] ℹ️ No automated logic defined for tag: ${tag}`);
-            }
-            await notifyUser(app.user_id, { title: 'Application Approved', message: 'Your request has been approved and finalized.', type: 'success', screen: '/application/', targetId: applicationId });
-        }
-        else if (updates.appStatus?.toLowerCase() === 'rejected') {
-            await notifyUser(app.user_id, { title: 'Application Rejected', message: 'Your request was not approved. Please check the officer notes.', type: 'danger', screen: '/application/', targetId: applicationId });
+            await notifyUser(app.user_id, { title: 'Application Approved', message: 'Your request has been approved.', type: 'success', screen: '/application/', targetId: applicationId });
         }
         await client.query('COMMIT');
         return updated.rows[0];
     }
     catch (error) {
         await client.query('ROLLBACK');
-        console.error('[reviewApplication Error]:', error);
         throw error;
     }
     finally {
@@ -957,7 +968,6 @@ export async function checkServiceEligibility(userId, serviceId) {
             }
             return { eligible: true };
         case 'driver_license_replacement':
-        case 'driver_license_international':
             if (!license)
                 return { eligible: false, reason: 'no_license', message: 'Active license required for this service.' };
             if (license.status !== 'active')
@@ -965,6 +975,50 @@ export async function checkServiceEligibility(userId, serviceId) {
             const isExpired = new Date(license.expiry_date) < today;
             if (isExpired)
                 return { eligible: false, reason: 'expired', message: 'Your license is expired. Please use the Renewal service first.' };
+            return { eligible: true };
+        case 'driver_license_international':
+            if (!license)
+                return { eligible: false, reason: 'no_license', message: 'Active license required for this service.' };
+            if (license.status !== 'active')
+                return { eligible: false, reason: 'suspended', message: 'This service is unavailable while your license is suspended or revoked.' };
+            const licenseIsExpired = new Date(license.expiry_date) < today;
+            if (licenseIsExpired)
+                return { eligible: false, reason: 'expired', message: 'Your license is expired. Please use the Renewal service first.' };
+            // Check if user already has a valid international verification certificate
+            const certCheck = await pool.query(`SELECT id, certificate_number, expiry_date FROM certificates
+         WHERE user_id = $1 AND certificate_type = 'international_verification'
+         AND (expiry_date IS NULL OR expiry_date > $2)`, [userId, today]);
+            if (certCheck.rows.length > 0) {
+                const cert = certCheck.rows[0];
+                const expiryText = cert.expiry_date ? ` (expires: ${new Date(cert.expiry_date).toLocaleDateString()})` : '';
+                return {
+                    eligible: false,
+                    reason: 'already_has_valid_certificate',
+                    message: `You already have a valid international verification certificate (${cert.certificate_number})${expiryText}. You cannot apply for another one while it remains valid.`
+                };
+            }
+            return { eligible: true };
+        case 'driver_license_transfer':
+            if (!license)
+                return { eligible: false, reason: 'no_license', message: 'Active license required for this service.' };
+            if (license.status !== 'active')
+                return { eligible: false, reason: 'suspended', message: 'This service is unavailable while your license is suspended or revoked.' };
+            const licenseExpiredForTransfer = new Date(license.expiry_date) < today;
+            if (licenseExpiredForTransfer)
+                return { eligible: false, reason: 'expired', message: 'Your license is expired. Please use the Renewal service first.' };
+            // Check if user is from Addis Ababa region
+            const userRes = await pool.query('SELECT region FROM "user" WHERE id = $1', [userId]);
+            if (userRes.rows.length === 0) {
+                return { eligible: false, reason: 'user_not_found', message: 'User profile not found.' };
+            }
+            const userRegion = userRes.rows[0].region;
+            if (!userRegion || userRegion.toLowerCase() !== 'addis ababa') {
+                return {
+                    eligible: false,
+                    reason: 'region_restricted',
+                    message: 'File transfer service is only available for Addis Ababa residents. Please contact your local office for assistance.'
+                };
+            }
             return { eligible: true };
         case 'lift_suspension':
             if (!license || license.status !== 'suspended') {
@@ -975,6 +1029,47 @@ export async function checkServiceEligibility(userId, serviceId) {
             // Everyone who has a license can request their info
             if (!license)
                 return { eligible: false, reason: 'no_license', message: 'No driver record found.' };
+            return { eligible: true };
+        case 'taxi_competency_cert':
+            if (!license)
+                return { eligible: false, reason: 'no_license', message: 'Active license required for this service.' };
+            if (license.status !== 'active')
+                return { eligible: false, reason: 'suspended', message: 'This service is unavailable while your license is suspended or revoked.' };
+            const licenseExpired = new Date(license.expiry_date) < today;
+            if (licenseExpired)
+                return { eligible: false, reason: 'expired', message: 'Your license is expired. Please use the Renewal service first.' };
+            // Check if user already has taxi competency
+            const categories = license.categories || [];
+            if (Array.isArray(categories) && categories.includes('Public Transport (Taxi)')) {
+                return {
+                    eligible: false,
+                    reason: 'already_has_taxi_competency',
+                    message: 'You already have taxi competency on your license. You cannot apply for taxi competency again.'
+                };
+            }
+            return { eligible: true };
+        case 'theory_test_scheduling':
+            // Check if user already has a scheduled test to prevent duplicates
+            const existingTestCheck = await pool.query(`SELECT id FROM test_records WHERE user_id = $1 AND status = 'scheduled' AND score IS NULL LIMIT 1`, [userId]);
+            if (existingTestCheck.rows.length > 0) {
+                return {
+                    eligible: false,
+                    reason: 'already_has_scheduled_test',
+                    message: 'You already have a scheduled test. If you need to change the date, please use the Reschedule Test service instead.'
+                };
+            }
+            return { eligible: true };
+        case 'test_rescheduling':
+            // Check if user has any scheduled tests that can be rescheduled
+            const scheduledTests = await pool.query(`SELECT id, test_type, scheduled_date FROM test_records
+         WHERE user_id = $1 AND status = 'scheduled' AND score IS NULL`, [userId]);
+            if (scheduledTests.rows.length === 0) {
+                return {
+                    eligible: false,
+                    reason: 'no_scheduled_test',
+                    message: 'You have no scheduled tests to reschedule. Please schedule a test first using the Theory Test Scheduling service.'
+                };
+            }
             return { eligible: true };
         default:
             // For services with no specific preconditions (like training info)

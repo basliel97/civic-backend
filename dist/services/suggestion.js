@@ -77,25 +77,43 @@ export async function getSuggestions(bureauId, status, page = 1, limit = 20) {
     let query = `
     SELECT s.*, b.name as bureau_name, u.name as user_name, u.username as user_fin
     FROM suggestions s
-    JOIN bureaus b ON s.bureau_id = b.id
+    LEFT JOIN bureaus b ON s.bureau_id = b.id
     JOIN "user" u ON s.user_id = u.id
     WHERE 1=1
   `;
     const params = [];
-    if (bureauId) {
+    // Handle bureau_id filter including NULL
+    if (bureauId === 'null' || bureauId === null) {
+        // Fetch suggestions with NULL bureau_id
+        query += ` AND s.bureau_id IS NULL`;
+    }
+    else if (bureauId) {
+        // Fetch suggestions with specific bureau_id
         params.push(bureauId);
         query += ` AND s.bureau_id = $${params.length}`;
     }
+    // If bureauId is undefined, fetch all suggestions (including NULL)
     if (status) {
         params.push(status);
         query += ` AND s.status = $${params.length}`;
     }
     query += ` ORDER BY s.created_at DESC LIMIT $${params.length + 1} OFFSET $${params.length + 2}`;
     const result = await pool.query(query, [...params, limit, offset]);
-    const countQuery = 'SELECT COUNT(*) FROM suggestions WHERE 1=1' +
-        (bureauId ? ` AND bureau_id = $1` : '') +
-        (status ? ` AND status = $${bureauId ? '$2' : '$1'}` : '');
-    const countResult = await pool.query(countQuery, params);
+    // Build count query dynamically
+    let countQuery = 'SELECT COUNT(*) FROM suggestions WHERE 1=1';
+    const countParams = [];
+    if (bureauId === 'null' || bureauId === null) {
+        countQuery += ` AND bureau_id IS NULL`;
+    }
+    else if (bureauId) {
+        countParams.push(bureauId);
+        countQuery += ` AND bureau_id = $${countParams.length}`;
+    }
+    if (status) {
+        countParams.push(status);
+        countQuery += ` AND status = $${countParams.length}`;
+    }
+    const countResult = await pool.query(countQuery, countParams);
     return {
         suggestions: result.rows,
         total: parseInt(countResult.rows[0].count),

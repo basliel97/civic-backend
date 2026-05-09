@@ -9,7 +9,7 @@ export const FulfillmentRegistry: Record<string, (client: PoolClient, userId: st
 
   'driver_license_renewal': async (client, userId, appId) => {
     await client.query(
-      `UPDATE driver_licenses SET expiry_date = expiry_date + INTERVAL '2 years', status = 'active', updated_at = NOW() WHERE user_id = $1`, [userId]
+      `UPDATE driver_licenses SET expiry_date = expiry_date + INTERVAL '5 years', status = 'active', updated_at = NOW() WHERE user_id = $1`, [userId]
     );
     await createNotification(client, userId, "License Renewed", "Your driver's license has been successfully extended for 2 years.", '/application/', appId);
   },
@@ -56,12 +56,54 @@ export const FulfillmentRegistry: Record<string, (client: PoolClient, userId: st
     await createNotification(client, userId, "Taxi Competency Issued", "You are now authorized for public taxi services.", '/application/', appId);
   },
 
-  'test_rescheduling': async (client, userId, appId, responses) => {
-    const newDate = responses?.preferred_date || new Date();
+  'theory_test_scheduling': async (client, userId, appId, responses) => {
+    const preferredDate = responses?.preferred_date || new Date();
+    const testType = responses?.test_type || 'theory';
+    const officeLocation = responses?.office_location;
+
     await client.query(
-      `INSERT INTO test_records (user_id, scheduled_date, status) VALUES ($1, $2, 'scheduled')`, [userId, newDate]
+      `INSERT INTO test_records (user_id, test_type, scheduled_date, status, office_location)
+       VALUES ($1, $2, $3, 'scheduled', $4)`,
+      [userId, testType, preferredDate, officeLocation]
     );
-    await createNotification(client, userId, "New Test Date", `Theory test rescheduled to ${new Date(newDate).toLocaleDateString()}.`, '/application/', appId);
+    await createNotification(client, userId, "Test Scheduled", `Your ${testType} test has been scheduled for ${new Date(preferredDate).toLocaleDateString()}.`, '/application/', appId);
+  },
+
+  'test_rescheduling': async (client, userId, appId, responses) => {
+    const testId = responses?.test_id;
+    const newDate = responses?.preferred_date || new Date();
+
+    if (!testId) {
+      throw new Error('Test ID is required for rescheduling');
+    }
+
+    // Check if the test exists and belongs to the user
+    const testCheck = await client.query(
+      `SELECT id, test_type, scheduled_date, status FROM test_records
+       WHERE id = $1 AND user_id = $2 AND status = 'scheduled' AND score IS NULL`,
+      [testId, userId]
+    );
+
+    if (testCheck.rows.length === 0) {
+      throw new Error('No valid scheduled test found for rescheduling');
+    }
+
+    const existingTest = testCheck.rows[0];
+
+    // Update the test with new date and mark as rescheduled
+    await client.query(
+      `UPDATE test_records SET scheduled_date = $1, status = 'rescheduled', updated_at = NOW()
+       WHERE id = $2`,
+      [newDate, testId]
+    );
+
+    // Then immediately set back to scheduled (but with updated_at showing it was rescheduled)
+    await client.query(
+      `UPDATE test_records SET status = 'scheduled' WHERE id = $1`,
+      [testId]
+    );
+
+    await createNotification(client, userId, "Test Rescheduled", `Your ${existingTest.test_type} test has been rescheduled to ${new Date(newDate).toLocaleDateString()}.`, '/application/', appId);
   },
 
   'lift_suspension': async (client, userId, appId) => {
