@@ -389,18 +389,37 @@ civicAdmin.delete('/bureaus/:id', adminAuth(), async (c) => {
         return c.json({ success: false, error: error.message }, 500);
     }
 });
+// Get all suggestions with filters
 civicAdmin.get('/suggestions', adminAuth(), async (c) => {
     try {
-        const query = c.req.query();
-        const bureauId = query.bureau_id;
-        const status = query.status;
-        const page = parseInt(query.page || '1');
-        const limit = Math.min(parseInt(query.limit || '20'), 50);
-        const result = await getSuggestions(bureauId, status, page, limit);
+        const url = new URL(c.req.url);
+        const bureauId = url.searchParams.get('bureauId');
+        const statusParam = url.searchParams.get('status');
+        const page = parseInt(url.searchParams.get('page') || '1');
+        const limit = parseInt(url.searchParams.get('limit') || '20');
+        // Convert null string to actual null, and convert null/undefined to undefined for status
+        const bureauIdParam = bureauId === 'null' ? null : bureauId;
+        const statusParamValue = statusParam === 'null' ? undefined : (statusParam || undefined);
+        const result = await getSuggestions(bureauIdParam, statusParamValue, page, limit);
         return c.json({ success: true, data: result });
     }
     catch (error) {
-        console.error('[Admin] Suggestions error:', error);
+        console.error('[Admin] Get suggestions error:', error);
+        return c.json({ success: false, error: error.message }, 500);
+    }
+});
+// Get single suggestion by ID
+civicAdmin.get('/suggestions/:id', adminAuth(), async (c) => {
+    try {
+        const { id } = c.req.param();
+        const suggestion = await getSuggestionById(id);
+        if (!suggestion) {
+            return c.json({ success: false, error: 'Suggestion not found' }, 404);
+        }
+        return c.json({ success: true, data: suggestion });
+    }
+    catch (error) {
+        console.error('[Admin] Get suggestion error:', error);
         return c.json({ success: false, error: error.message }, 500);
     }
 });

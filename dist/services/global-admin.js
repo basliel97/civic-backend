@@ -30,23 +30,42 @@ export async function getGlobalAdminStatsOverview() {
 export async function getPlatformGrowthTrends() {
     const result = await pool.query(`
     WITH months AS (
-      -- Generate a list of the last 6 months
       SELECT date_trunc('month', series) as month_date
-      FROM generate_series(now() - INTERVAL '5 months', now(), '1 month') AS series
+      FROM generate_series(
+        now() - INTERVAL '2 months',
+        now() + INTERVAL '2 months',
+        INTERVAL '1 month'
+      ) AS series
     )
+
     SELECT 
       to_char(m.month_date, 'Mon YYYY') as label,
       
       -- New Citizens count per month
-      (SELECT COUNT(*) FROM "user" 
-       WHERE role = 'citizen' 
-       AND date_trunc('month', created_at) = m.month_date) as citizens,
-       
-      -- Engagement (Apps + Posts + Votes) per month
       (
-        (SELECT COUNT(*) FROM transport_applications WHERE date_trunc('month', created_at) = m.month_date) +
-        (SELECT COUNT(*) FROM posts WHERE date_trunc('month', created_at) = m.month_date) +
-        (SELECT COUNT(*) FROM poll_votes WHERE date_trunc('month', voted_at) = m.month_date)
+        SELECT COUNT(*) 
+        FROM "user"
+        WHERE role = 'citizen'
+        AND date_trunc('month', created_at) = m.month_date
+      ) as citizens,
+       
+      -- Engagement (Applications + Posts + Votes)
+      (
+        (SELECT COUNT(*) 
+         FROM transport_applications
+         WHERE date_trunc('month', created_at) = m.month_date)
+         
+        +
+        
+        (SELECT COUNT(*) 
+         FROM posts
+         WHERE date_trunc('month', created_at) = m.month_date)
+         
+        +
+        
+        (SELECT COUNT(*) 
+         FROM poll_votes
+         WHERE date_trunc('month', voted_at) = m.month_date)
       ) as interactions
       
     FROM months m
@@ -68,13 +87,18 @@ export async function getGlobalAdminStatsDetailed() {
     const citizensByGenderResult = await pool.query("SELECT gender, COUNT(*) as count FROM \"user\" WHERE role = 'citizen' AND deleted_at IS NULL AND gender IS NOT NULL GROUP BY gender");
     const citizensByGender = Object.fromEntries(citizensByGenderResult.rows.map(row => [row.gender, parseInt(row.count)]));
     // Citizens by verification status (email_verified)
-    const citizensByVerificationResult = await pool.query("SELECT email_verified, COUNT(*) as count FROM \"user\" WHERE role = 'citizen' AND deleted_at IS NULL GROUP BY email_verified");
-    const citizensByVerificationStatus = Object.fromEntries(citizensByVerificationResult.rows.map(row => [row.email_verified ? 'verified' : 'unverified', parseInt(row.count)]));
     // Citizens by activity level (based on last_login_at, e.g., active within 30 days)
-    const thirtyDaysAgo = new Date();
-    thirtyDaysAgo.setDate(thirtyDaysAgo.getDate() - 30);
-    const citizensByActivityResult = await pool.query("SELECT CASE WHEN last_login_at >= $1 THEN 'active' ELSE 'inactive' END as activity, COUNT(*) as count FROM \"user\" WHERE role = 'citizen' AND deleted_at IS NULL GROUP BY activity", [thirtyDaysAgo.toISOString()]);
-    const citizensByActivityLevel = Object.fromEntries(citizensByActivityResult.rows.map(row => [row.activity, parseInt(row.count)]));
+    const citizensByActivityResult = await pool.query(`SELECT 
+     status as activity, 
+     COUNT(*) as count 
+   FROM "user" 
+   WHERE role = 'citizen' 
+     AND deleted_at IS NULL 
+   GROUP BY status`);
+    const citizensByActivityLevel = Object.fromEntries(citizensByActivityResult.rows.map(row => [
+        row.activity,
+        parseInt(row.count)
+    ]));
     // Admins by bureau
     const adminsByBureauResult = await pool.query("SELECT b.name as bureau_name, COUNT(u.id) as count FROM \"user\" u LEFT JOIN bureaus b ON u.bureau_id = b.id WHERE u.role IN ('admin', 'super_admin') AND u.deleted_at IS NULL GROUP BY b.name");
     const adminsByBureau = Object.fromEntries(adminsByBureauResult.rows.map(row => [row.bureau_name || 'Global', parseInt(row.count)]));
@@ -94,7 +118,6 @@ export async function getGlobalAdminStatsDetailed() {
         citizensByRegion,
         citizensByWorkType,
         citizensByGender,
-        citizensByVerificationStatus,
         citizensByActivityLevel,
         adminsByBureau,
         pollsByStatus,
