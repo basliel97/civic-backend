@@ -129,7 +129,7 @@ agencyManagement.put('/bureaus/:bureauId/superadmins/:id', adminAuth(), globalSu
   }
 });
 
-// 3. DELETE Super Admin (Soft Delete - Global Super Admin only)
+// 3. DELETE Super Admin (Hard Delete - Global Super Admin only)
 agencyManagement.delete('/bureaus/:bureauId/superadmins/:id', adminAuth(), globalSuperAdminAuth(), async (c) => {
   try {
     const adminId = c.get('user_id');
@@ -158,13 +158,12 @@ agencyManagement.delete('/bureaus/:bureauId/superadmins/:id', adminAuth(), globa
       return c.json({ success: false, error: 'Super Admin not found' }, 404);
     }
 
-    // Soft delete: set deleted_at and update status
+    // Hard delete the user
     const result = await pool.query(
-      `UPDATE "user" 
-       SET deleted_at = NOW(), status = 'deleted', deleted_by = $1, updated_at = NOW()
-       WHERE id = $2 AND bureau_id = $3 AND role = 'super_admin' AND deleted_at IS NULL
+      `DELETE FROM "user"
+       WHERE id = $1 AND bureau_id = $2 AND role = 'super_admin' AND deleted_at IS NULL
        RETURNING id, name, email`,
-      [adminId, id, bureauId]
+      [id, bureauId]
     );
 
     if (result.rows.length === 0) {
@@ -174,13 +173,13 @@ agencyManagement.delete('/bureaus/:bureauId/superadmins/:id', adminAuth(), globa
     // Log admin action
     await logAdminAction(adminId, bureauId, 'DELETE_SUPER_ADMIN', 'user', id,
       oldUser.rows[0],
-      { id, name: oldUser.rows[0].name, email: oldUser.rows[0].email, role: 'super_admin', status: 'deleted', deleted_by: adminId },
+      null,
       { deleted_by: adminId }
     );
 
-    return c.json({ 
-      success: true, 
-      message: 'Super Admin deleted successfully' 
+    return c.json({
+      success: true,
+      message: 'Super Admin deleted successfully'
     });
   } catch (error: any) {
     console.error('[Global Admin] Delete Super Admin error:', error);
@@ -334,7 +333,7 @@ agencyManagement.patch('/staff/:id/status', superAdminAuth(), async (c) => {
   }
 });
 
-// 5. DELETE Staff (Soft Delete - if they resign or are fired)
+// 5. DELETE Staff (Hard Delete - if they resign or are fired)
 agencyManagement.delete('/staff/:id', superAdminAuth(), async (c) => {
   try {
     const adminId = c.get('user_id');
@@ -354,13 +353,12 @@ agencyManagement.delete('/staff/:id', superAdminAuth(), async (c) => {
     );
     if (oldUser.rows.length === 0) return c.json({ success: false, error: 'Staff member not found' }, 404);
 
-    // Soft delete: set deleted_at to NOW()
+    // Hard delete the user
     const result = await pool.query(
-      `UPDATE "user" 
-       SET deleted_at = NOW(), status = 'deleted', deleted_by = $1, updated_at = NOW()
-       WHERE id = $2 AND bureau_id = $3 AND deleted_at IS NULL
+      `DELETE FROM "user"
+       WHERE id = $1 AND bureau_id = $2 AND deleted_at IS NULL
        RETURNING id, name`,
-      [adminId, id, bureauId]
+      [id, bureauId]
     );
 
     if (result.rows.length === 0) return c.json({ success: false, error: 'Staff member not found' }, 404);
@@ -368,7 +366,7 @@ agencyManagement.delete('/staff/:id', superAdminAuth(), async (c) => {
     // Log admin action
     await logAdminAction(adminId, bureauId, 'delete_staff', 'user', id,
       oldUser.rows[0],
-      { id, name: oldUser.rows[0].name, email: oldUser.rows[0].email, role: oldUser.rows[0].role, status: 'deleted' },
+      null,
       { deleted_by: adminId }
     );
 

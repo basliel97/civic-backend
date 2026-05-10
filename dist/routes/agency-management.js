@@ -33,6 +33,105 @@ agencyManagement.post('/create-agency-head', adminAuth(), globalSuperAdminAuth()
         return c.json({ success: false, error: error.message }, 500);
     }
 });
+// 2. UPDATE Super Admin (Global Super Admin only)
+agencyManagement.put('/bureaus/:bureauId/superadmins/:id', adminAuth(), globalSuperAdminAuth(), async (c) => {
+    try {
+        const adminId = c.get('user_id');
+        const { bureauId, id } = c.req.param();
+        const { name, email, status } = await c.req.json();
+        // Check if bureau exists
+        const bureauCheck = await pool.query('SELECT id, name FROM bureaus WHERE id = $1 AND status = $2', [bureauId, 'active']);
+        if (bureauCheck.rows.length === 0) {
+            return c.json({ success: false, error: 'Bureau not found' }, 404);
+        }
+        // Get old values for audit
+        const oldUser = await pool.query(`SELECT id, name, email, role, status, bureau_id FROM "user" WHERE id = $1 AND role = 'super_admin' AND deleted_at IS NULL`, [id]);
+        if (oldUser.rows.length === 0) {
+            return c.json({ success: false, error: 'Super Admin not found' }, 404);
+        }
+        // Build dynamic update query based on provided fields
+        const updates = [];
+        const values = [];
+        let paramCount = 1;
+        if (name) {
+            updates.push(`name = $${paramCount++}`);
+            values.push(name);
+        }
+        if (email) {
+            updates.push(`email = $${paramCount++}`);
+            values.push(email);
+        }
+        if (status && ['active', 'inactive', 'suspended'].includes(status)) {
+            updates.push(`status = $${paramCount++}`);
+            values.push(status);
+        }
+        if (updates.length === 0) {
+            return c.json({ success: false, error: 'No fields to update' }, 400);
+        }
+        updates.push(`updated_at = NOW()`);
+        values.push(id);
+        values.push(bureauId);
+        const query = `
+      UPDATE "user" 
+      SET ${updates.join(', ')} 
+      WHERE id = $${paramCount} AND bureau_id = $${paramCount + 1} AND role = 'super_admin' AND deleted_at IS NULL
+      RETURNING id, name, email, role, status, bureau_id, updated_at
+    `;
+        const result = await pool.query(query, values);
+        if (result.rows.length === 0) {
+            return c.json({ success: false, error: 'Super Admin not found or not in the specified bureau' }, 404);
+        }
+        // Log admin action
+        await logAdminAction(adminId, bureauId, 'UPDATE_SUPER_ADMIN', 'user', id, oldUser.rows[0], result.rows[0], { updated_fields: Object.keys({ name, email, status }).filter(k => k && (name || email || status)) });
+        return c.json({
+            success: true,
+            message: 'Super Admin updated successfully',
+            data: result.rows[0]
+        });
+    }
+    catch (error) {
+        console.error('[Global Admin] Update Super Admin error:', error);
+        return c.json({ success: false, error: error.message }, 500);
+    }
+});
+// 3. DELETE Super Admin (Hard Delete - Global Super Admin only)
+agencyManagement.delete('/bureaus/:bureauId/superadmins/:id', adminAuth(), globalSuperAdminAuth(), async (c) => {
+    try {
+        const adminId = c.get('user_id');
+        const { bureauId, id } = c.req.param();
+        // Prevent self-deletion
+        if (id === adminId) {
+            return c.json({ success: false, error: 'You cannot delete your own account' }, 400);
+        }
+        // Check if bureau exists
+        const bureauCheck = await pool.query('SELECT id, name FROM bureaus WHERE id = $1 AND status = $2', [bureauId, 'active']);
+        if (bureauCheck.rows.length === 0) {
+            return c.json({ success: false, error: 'Bureau not found' }, 404);
+        }
+        // Get old values for audit
+        const oldUser = await pool.query(`SELECT id, name, email, role, status, bureau_id FROM "user" WHERE id = $1 AND role = 'super_admin' AND deleted_at IS NULL`, [id]);
+        if (oldUser.rows.length === 0) {
+            return c.json({ success: false, error: 'Super Admin not found' }, 404);
+        }
+        // Hard delete the user
+        const result = await pool.query(`DELETE FROM "user"
+       WHERE id = $1 AND bureau_id = $2 AND role = 'super_admin' AND deleted_at IS NULL
+       RETURNING id, name, email`, [id, bureauId]);
+        if (result.rows.length === 0) {
+            return c.json({ success: false, error: 'Super Admin not found or not in the specified bureau' }, 404);
+        }
+        // Log admin action
+        await logAdminAction(adminId, bureauId, 'DELETE_SUPER_ADMIN', 'user', id, oldUser.rows[0], null, { deleted_by: adminId });
+        return c.json({
+            success: true,
+            message: 'Super Admin deleted successfully'
+        });
+    }
+    catch (error) {
+        console.error('[Global Admin] Delete Super Admin error:', error);
+        return c.json({ success: false, error: error.message }, 500);
+    }
+});
 /**
  * ==========================================
  * AGENCY SUPER ADMIN ACTIONS (Agency Head)
@@ -136,7 +235,7 @@ agencyManagement.patch('/staff/:id/status', superAdminAuth(), async (c) => {
         return c.json({ success: false, error: error.message }, 500);
     }
 });
-// 5. DELETE Staff (Soft Delete - if they resign or are fired)
+// 5. DELETE Staff (Hard Delete - if they resign or are fired)
 agencyManagement.delete('/staff/:id', superAdminAuth(), async (c) => {
     try {
         const adminId = c.get('user_id');
@@ -151,15 +250,14 @@ agencyManagement.delete('/staff/:id', superAdminAuth(), async (c) => {
         const oldUser = await pool.query(`SELECT id, name, email, role FROM "user" WHERE id = $1 AND bureau_id = $2 AND deleted_at IS NULL`, [id, bureauId]);
         if (oldUser.rows.length === 0)
             return c.json({ success: false, error: 'Staff member not found' }, 404);
-        // Soft delete: set deleted_at to NOW()
-        const result = await pool.query(`UPDATE "user" 
-       SET deleted_at = NOW(), status = 'deleted', deleted_by = $1, updated_at = NOW()
-       WHERE id = $2 AND bureau_id = $3 AND deleted_at IS NULL
-       RETURNING id, name`, [adminId, id, bureauId]);
+        // Hard delete the user
+        const result = await pool.query(`DELETE FROM "user"
+       WHERE id = $1 AND bureau_id = $2 AND deleted_at IS NULL
+       RETURNING id, name`, [id, bureauId]);
         if (result.rows.length === 0)
             return c.json({ success: false, error: 'Staff member not found' }, 404);
         // Log admin action
-        await logAdminAction(adminId, bureauId, 'delete_staff', 'user', id, oldUser.rows[0], { id, name: oldUser.rows[0].name, email: oldUser.rows[0].email, role: oldUser.rows[0].role, status: 'deleted' }, { deleted_by: adminId });
+        await logAdminAction(adminId, bureauId, 'delete_staff', 'user', id, oldUser.rows[0], null, { deleted_by: adminId });
         return c.json({ success: true, message: 'Staff member removed successfully' });
     }
     catch (error) {

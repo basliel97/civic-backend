@@ -384,14 +384,14 @@ citizenManagement.put("/citizens/:id", adminAuth(), async (c) => {
 
 /**
  * DELETE /api/admin/citizens/:id
- * Soft delete citizen
+ * Hard delete citizen
  */
 citizenManagement.delete("/citizens/:id", adminAuth(), async (c) => {
   try {
     const { id } = c.req.param();
     const adminId = c.get('user_id');
     const { reason } = await c.req.json();
-    
+
     // Check if trying to delete self
     if (id === adminId) {
       return c.json({
@@ -399,32 +399,47 @@ citizenManagement.delete("/citizens/:id", adminAuth(), async (c) => {
         error: "Cannot delete your own account"
       }, 400);
     }
-    
-    const result = await pool.query(
-      `UPDATE "user"
-      SET 
-        deleted_at = NOW(),
-        deleted_by = $1,
-        deletion_reason = $2,
-        status = 'deleted'
-      WHERE id = $3 AND role = 'citizen' AND deleted_at IS NULL
-      RETURNING id, username, name`,
-      [adminId, reason || 'No reason provided', id]
+
+    // Get old values for audit
+    const oldUser = await pool.query(
+      `SELECT id, username, name, email FROM "user" WHERE id = $1 AND role = 'citizen' AND deleted_at IS NULL`,
+      [id]
     );
-    
+    if (oldUser.rows.length === 0) {
+      return c.json({
+        success: false,
+        error: "Citizen not found or already deleted"
+      }, 404);
+    }
+
+    // Hard delete the citizen
+    const result = await pool.query(
+      `DELETE FROM "user"
+      WHERE id = $1 AND role = 'citizen' AND deleted_at IS NULL
+      RETURNING id, username, name`,
+      [id]
+    );
+
     if (result.rows.length === 0) {
       return c.json({
         success: false,
         error: "Citizen not found or already deleted"
       }, 404);
     }
-    
+
+    // Log admin action
+    await logAdminAction(adminId, null, 'DELETE_CITIZEN', 'user', id,
+      oldUser.rows[0],
+      null,
+      { deleted_by: adminId, reason: reason || 'No reason provided' }
+    );
+
     return c.json({
       success: true,
       message: "Citizen deleted successfully",
       data: result.rows[0]
     });
-    
+
   } catch (error: any) {
     console.error("[Citizen Management] Delete error:", error);
     return c.json({
@@ -486,35 +501,46 @@ citizenManagement.patch("/citizens/:id/status", adminAuth(), async (c) => {
 
 /**
  * POST /api/admin/citizens/bulk-delete
- * Bulk delete citizens
+ * Bulk hard delete citizens
  */
 citizenManagement.post("/citizens/bulk-delete", adminAuth(), async (c) => {
   try {
     const adminId = c.get('user_id');
     const { ids, reason } = await c.req.json();
-    
+
     if (!Array.isArray(ids) || ids.length === 0) {
       return c.json({
         success: false,
         error: "Please provide an array of citizen IDs"
       }, 400);
     }
-    
+
     // Remove admin's own ID if present
     const filteredIds = ids.filter((id: string) => id !== adminId);
-    
-    const result = await pool.query(
-      `UPDATE "user"
-      SET 
-        deleted_at = NOW(),
-        deleted_by = $1,
-        deletion_reason = $2,
-        status = 'deleted'
-      WHERE id = ANY($3) AND role = 'citizen' AND deleted_at IS NULL
-      RETURNING id`,
-      [adminId, reason || 'Bulk delete', filteredIds]
+
+    // Get old values for audit
+    const oldUsers = await pool.query(
+      `SELECT id, username, name, email FROM "user" WHERE id = ANY($1) AND role = 'citizen' AND deleted_at IS NULL`,
+      [filteredIds]
     );
-    
+
+    // Hard delete the citizens
+    const result = await pool.query(
+      `DELETE FROM "user"
+      WHERE id = ANY($1) AND role = 'citizen' AND deleted_at IS NULL
+      RETURNING id`,
+      [filteredIds]
+    );
+
+    // Log admin actions for each deleted citizen
+    for (const oldUser of oldUsers.rows) {
+      await logAdminAction(adminId, null, 'DELETE_CITIZEN', 'user', oldUser.id,
+        oldUser,
+        null,
+        { deleted_by: adminId, reason: reason || 'Bulk delete' }
+      );
+    }
+
     return c.json({
       success: true,
       message: `${result.rowCount} citizens deleted successfully`,
@@ -523,7 +549,7 @@ citizenManagement.post("/citizens/bulk-delete", adminAuth(), async (c) => {
         requestedCount: ids.length
       }
     });
-    
+
   } catch (error: any) {
     console.error("[Citizen Management] Bulk delete error:", error);
     return c.json({
