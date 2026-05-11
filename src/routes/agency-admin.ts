@@ -618,11 +618,11 @@ agencyAdmin.delete('/announcements/:id', async (c) => {
 
     // Log admin action
     await logAdminAction(adminId, bureauId, 'delete_announcement', 'announcements', id,
-      { is_active: true },
-      { is_active: false }
+      deleted,
+      null
     );
 
-    return c.json({ success: true, message: 'Announcement deactivated', data: deleted });
+    return c.json({ success: true, message: 'Announcement deleted', data: deleted });
   } catch (error: any) {
     return c.json({ success: false, error: error.message }, 500);
   }
