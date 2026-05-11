@@ -1108,7 +1108,7 @@ export async function updateAnnouncement(id: string, bureauId: string | null, ad
 }
 
 /**
- * Delete/deactivate an announcement
+ * Delete an announcement (hard delete)
  */
 export async function deleteAnnouncement(id: string, bureauId: string | null, adminId: string) {
   // Check ownership
@@ -1121,9 +1121,9 @@ export async function deleteAnnouncement(id: string, bureauId: string | null, ad
     throw new Error('Announcement not found or you do not have permission to delete it');
   }
 
-  // Soft delete by setting is_active to false
+  // Hard delete the announcement
   const result = await pool.query(
-    `UPDATE announcements SET is_active = FALSE, updated_at = NOW() WHERE id = $1 RETURNING *`,
+    `DELETE FROM announcements WHERE id = $1 RETURNING *`,
     [id]
   );
 

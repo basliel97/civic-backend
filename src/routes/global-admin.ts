@@ -108,7 +108,7 @@ globalAdmin.delete('/announcements/:id', async (c) => {
     const { id } = c.req.param();
 
     const deleted = await deleteAnnouncement(id, null, adminId);
-    return c.json({ success: true, message: 'Announcement deactivated', data: deleted });
+    return c.json({ success: true, message: 'Announcement deleted', data: deleted });
   } catch (error: any) {
     console.error('[Global Admin] Delete announcement error:', error);
     return c.json({ success: false, error: error.message }, 500);
