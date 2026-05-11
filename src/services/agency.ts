@@ -1335,14 +1335,35 @@ export async function checkServiceEligibility(userId: string, serviceId: string)
   const service = serviceRes.rows[0];
   const tag = service.automation_tag;
 
-  // 2. Get the citizen's current license record
+  // 2. Check for existing pending/submitted applications for this service
+  const existingApplicationCheck = await pool.query(
+    `SELECT id, application_status, created_at FROM transport_applications
+     WHERE user_id = $1 AND service_id = $2 AND application_status IN ('submitted', 'pending', 'processing')
+     ORDER BY created_at DESC LIMIT 1`,
+    [userId, serviceId]
+  );
+
+  if (existingApplicationCheck.rows.length > 0) {
+    const existingApp = existingApplicationCheck.rows[0];
+    const statusText = existingApp.application_status === 'submitted' ? 'pending review' :
+                      existingApp.application_status === 'pending' ? 'being processed' :
+                      existingApp.application_status === 'processing' ? 'under processing' : existingApp.application_status;
+
+    return {
+      eligible: false,
+      reason: 'existing_application',
+      message: `You already have an application for this service that is ${statusText}. You cannot submit another application until the current one is completed or cancelled.`
+    };
+  }
+
+  // 4. Get the citizen's current license record
   const licenseRes = await pool.query(
     'SELECT * FROM driver_licenses WHERE user_id = $1',
     [userId]
   );
   const license = licenseRes.rows[0];
 
-  // 3. DEFINE THE RULES
+  // 5. DEFINE THE RULES
   const today = new Date();
 
   switch (tag) {
